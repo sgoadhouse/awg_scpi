@@ -220,11 +220,13 @@ class AWG(SCPI):
         self._setGenericParameter(invertStr, self._Cmd('setOutputPolarity'), channel, wait, checkErrors)
         
     def setSignalInverted(self, invert, channel=None, wait=None, checkErrors=None):
-        """Set the signal inverted or not for the channel
+        """Set the signal inverted or not for the channel. This does the exact
+           same action as setOutputInverted() but uses a different command.
         
            invert         - a boolean that if True will set signal inverted, else normal
            wait           - number of seconds to wait after sending command
            channel        - number of the channel starting at 1
+
         """ 
             
         self._setGenericParameter(self._bool2onORoff(invert), self._Cmd('setSignalPolarity'), channel, wait, checkErrors)
@@ -685,6 +687,11 @@ if __name__ == '__main__':
     #sleep(2)
     #instr.outputOffAll()
 
+    if instr.isOutputHiZ(instr.channel):
+        print("Output High Impedance")
+    else:
+        print("Output 50 ohm load")
+    
     instr.beeperOn()
 
     #@@@#print(instr._instQuery("C1:BSWV?"))
@@ -758,14 +765,13 @@ if __name__ == '__main__':
     # Setup a different basic wave output
     instr.setWaveType('PULSE')
     instr.setFrequency(1e3)
-    instr.setHighLevel(3.0)
-    instr.setLowLevel(0)
+    instr.setOutputInverted(True) # Set first so setHighLevel() and setLowLevel() can help
+    instr.setOutputLoad(False)
+    instr.setHighLevel(3.1)
+    instr.setLowLevel(0.2)
     instr.setPulseWidth(50e-9)
     instr.setPulseRise(2e-9)
     instr.setPulseFall(2e-9)
-    instr.setOutputLoad(True)
-    instr.setOutputInverted(False)
-    instr.setSignalInverted(True)
     
     # turn on the channel
     instr.outputOn()

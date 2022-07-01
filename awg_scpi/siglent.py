@@ -161,30 +161,83 @@ class Siglent(AWG):
     def setRemoteLock(self):
         # No Local/Remote setting
         pass
-    
-    def isOutputOn(self, channel=None):
-        """Return true if the output of channel is ON, else false
 
-           channel - number of the channel starting at 1
+    def _queryOutput(self, channel=None):
+        """Perform an output query on the default channel and return a list of the returned parameters
+
+           order of returned parameters: ON|OFF,LOAD,50|HZ,PLRT,NOR|INVT
+
+           channel        - number of the channel starting at 1
         """
 
         # If a channel number is passed in, make it the
         # current channel
         if channel is not None:
             self.channel = channel
-
+        
         str = '{}:OUTP'.format(self.channelStr(self.channel))
         ret = self._instQuery(str+'?')
         words = ret.split(' ')  # split by words with spaces
 
-        if(words[0].strip() != str):
+        if(len(words) != 2 or words[0].strip() != str):
             raise RuntimeError('Unexpected return string for OUTP? command: "' + ret + '"')
 
-        param = words[1].strip().split(',')
-
         #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param)
+
+        # return the comma seperate list of parameters as a Python list
+        # ORDER: ON|OFF,LOAD,50|HZ,PLRT,NOR|INVT
+        return words[1].strip().split(',')
+
+    def isOutputHiZ(self, channel=None):
+        """Return true if the output of channel is set for high impedance, else false
+
+           channel - number of the channel starting at 1
+        """
+
+        outp = self._queryOutput(channel)
         
-        return self._onORoff(param[0])
+        if(len(outp) != 5 or outp[1].lower() != "load"):
+            raise RuntimeError('Unexpected return parameters for OUTP? command: {}'.format(outp))
+            
+        # The third parameter is 50 for 50 ohm load and HZ for high impedance
+        return (outp[2].lower() == "hz")
+
+    def isOutput50(self, channel=None):
+        """Return true if the output of channel is set for 50 ohm load, else false
+
+           channel - number of the channel starting at 1
+        """
+
+        outp = self._queryOutput(channel)
+        
+        if(len(outp) != 5 or outp[1].lower() != "load"):
+            raise RuntimeError('Unexpected return parameters for OUTP? command: {}'.format(outp))
+            
+        # The third parameter is 50 for 50 ohm load and HZ for high impedance
+        return (outp[2] == "50")
+
+    def isOutputInverted(self, channel=None):
+        """Return true if the output of channel is inverted, else false
+
+           channel - number of the channel starting at 1
+        """
+
+        outp = self._queryOutput(channel)
+        
+        if(len(outp) != 5 or outp[3].lower() != "plrt"):
+            raise RuntimeError('Unexpected return parameters for OUTP? command: {}'.format(outp))
+            
+        # The fifth parameter is NOR for normal and INVT for inverted
+        return (outp[4].lower() == "invt")
+
+    def isOutputOn(self, channel=None):
+        """Return true if the output of channel is ON, else false
+
+           channel - number of the channel starting at 1
+        """
+
+        # The first parameter is ON for output on and OFF for output off
+        return self._onORoff(self._queryOutput(channel)[0])
 
     def outputOn(self, channel=None, wait=None):
         """Turn on the output for channel
@@ -259,6 +312,42 @@ class Siglent(AWG):
 
         sleep(wait)             # give some time for PS to respond
 
+    # ===========================================================================
+    # Help user with voltage output level when output is inverted - non-intuitive
+    # ===========================================================================
+    def setHighLevel(self, highLevel, channel=None, wait=None, checkErrors=None):
+        """Set the high voltage level for the channel
+        
+           highLevel      - desired voltage high level as a floating point value in Volts
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+
+        # First check if output is currently set to be inverted. If
+        # so, need to set Low Level to -1*highLevel so that highlevel
+        # will be the actual high level with inverted output
+        if self.isOutputInverted(channel):
+            self._setGenericParameter(-1*highLevel, self._Cmd('setLowLevel'), channel, wait, checkErrors)
+        else:
+            self._setGenericParameter(highLevel, self._Cmd('setHighLevel'), channel, wait, checkErrors)
+
+    def setLowLevel(self, lowLevel, channel=None, wait=None, checkErrors=None):
+        """Set the low voltage level for the channel
+        
+           lowLevel       - desired voltage low level as a floating point value in Volts
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+
+        # First check if output is currently set to be inverted. If
+        # so, need to set High Level to -1*lowLevel so that lowlevel
+        # will be the actual low level with inverted output
+        if self.isOutputInverted(channel):
+            self._setGenericParameter(-1*lowLevel, self._Cmd('setHighLevel'), channel, wait, checkErrors)
+        else:
+            self._setGenericParameter(lowLevel, self._Cmd('setLowLevel'), channel, wait, checkErrors)
+        
+            
     # =========================================================
     # Check for instrument errors:
     # =========================================================
@@ -285,12 +374,16 @@ class Siglent(AWG):
                     # Not "No error".
                     #
                     # However, for some unknown reason, the BSWV
-                    # command ALWAYS returns -108 error code so if see
-                    # that, ignore
+                    # command and OUTP command ALWAYS returns -108
+                    # error code so if see that, ignore
                     if error_string.find("-108,", 0, 5) != -1:
                         cmdWords = commandStr.split(' ')
                         cmdParts = cmdWords[0].strip().lower().split(':')
-                        if (len(cmdParts) == 2 and (cmdParts[1] == 'bswv' or cmdParts[1] == 'basic_wave')):
+                        if (len(cmdParts) == 2 and
+                            (cmdParts[1] == 'bswv'
+                             or cmdParts[1] == 'basic_wave'
+                             or cmdParts[1] == 'outp'
+                             or cmdParts[1] == 'output')):
                             break
                         
                     print("ERROR({:02d}): {}, command: '{}'".format(reads, error_string, commandStr))
