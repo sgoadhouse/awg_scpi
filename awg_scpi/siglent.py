@@ -50,12 +50,35 @@ import pyvisa as visa
 class Siglent(AWG):
     """Child class of AWG for controlling and accessing a Siglent Arbitrary Waveform Generator with PyVISA and SCPI commands"""
 
-    ## Dictionary to translate SCPI commands for this device
-    _xlateCmdTbl = {
+    # "Overload" _SCPICmdTbl[] in parent with these comands
+    _SiglentCmdTbl = {
         'beeperOn':                      'BUZZ ON',
         'beeperOff':                     'BUZZ OFF',
-    }
 
+        # first {} is channel name, second {} is the value
+        'setWaveType':                   '{}:BSWV WVTP,{}',
+        'setFrequency':                  '{}:BSWV FRQ,{}',
+        'setPeriod':                     '{}:BSWV PERI,{}',
+        'setAmplitude':                  '{}:BSWV AMP,{}',
+        'setOffset':                     '{}:BSWV OFST,{}',
+        'setPhase':                      '{}:BSWV PHSE,{}',
+        'setDutyCycle':                  '{}:BSWV DUTY,{}',
+        'setRise':                       '{}:BSWV RISE,{}',
+        'setFall':                       '{}:BSWV FALL,{}',
+        'setDelay':                      '{}:BSWV DLY,{}',
+        'setWaveParameters':             '{}:BSWV {}',
+        'queryWaveParameters':           '{}:BSWV?',
+
+        'measureVoltage':                'MEASure:VOLTage:DC?',
+        'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
+        'setVoltageProtectionDelay':     'SOURce:VOLTage:PROTection:DELay {}',
+        'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
+        'voltageProtectionOn':           'SOURce:VOLTage:PROTection:STATe ON',
+        'voltageProtectionOff':          'SOURce:VOLTage:PROTection:STATe OFF',
+        'isVoltageProtectionTripped':    'SOURce:VOLTage:PROTection:TRIPped?',
+        'voltageProtectionClear':        'SOURce:VOLTage:PROTection:CLEar',
+    }
+    
     def __init__(self, resource, maxChannel=2, wait=0):
         """Init the class with the instruments resource string
 
@@ -65,11 +88,15 @@ class Siglent(AWG):
         """
         # NOTE: maxChannel is accessible in this package via parent as: self._max_chan
         super(Siglent, self).__init__(resource, maxChannel, wait,
-                                       cmd_prefix='',
-                                       read_strip='\n',
-                                       read_termination='',
-                                       write_termination='\n'
+                                      cmds=self._SiglentCmdTbl,
+                                      cmd_prefix='',
+                                      read_strip='\n',
+                                      read_termination='',
+                                      write_termination='\n'
         )
+
+        # No longer need _AWGCmdTbl[] so delete it
+        del Siglent._SiglentCmdTbl
 
         # Return list of valid analog channel strings. These are numbers.
         self._chanAnaValidList = [str(x) for x in range(1,self._max_chan+1)]
@@ -92,6 +119,9 @@ class Siglent(AWG):
         # commands, so set to 0.00
         self._versionLegacy = 0.00
 
+        # If SIGLENT, these are the acceptable Wave Types
+        self._validWaveTypes = ['SINE', 'SQUARE', 'RAMP', 'PULSE', 'NOISE', 'ARB', 'DC', 'PRBS']
+        
         # This will store annotation text if that feature is used
         self._annotationText = ''
         self._annotationColor = 'ch1' # default to Channel 1 color

@@ -54,29 +54,6 @@ class SCPI(object):
         'isOutput':                      'OUTPut:STATe?',
         'outputOn':                      'OUTPut:STATe ON',
         'outputOff':                     'OUTPut:STATe OFF',
-
-        # From Siglent SDG series
-        'setWaveType':                   '{}:BSWV WVTP,{}',
-        'setFrequency':                  '{}:BSWV FRQ,{}',
-        'setPeriod':                     '{}:BSWV PERI,{}',
-        'setAmplitude':                  '{}:BSWV AMP,{}',
-        'setOffset':                     '{}:BSWV OFST,{}',
-        'setPhase':                      '{}:BSWV PHSE,{}',
-        'setDuty':                       '{}:BSWV DUTY,{}',
-        'setRise':                       '{}:BSWV RISE,{}',
-        'setFall':                       '{}:BSWV FALL,{}',
-        'setDelay':                      '{}:BSWV DLY,{}',
-        'setWaveParameters':             '{}:BSWV {}',
-        'queryWaveParameters':           '{}:BSWV?',
-
-        'measureVoltage':                'MEASure:VOLTage:DC?',
-        'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
-        'setVoltageProtectionDelay':     'SOURce:VOLTage:PROTection:DELay {}',
-        'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
-        'voltageProtectionOn':           'SOURce:VOLTage:PROTection:STATe ON',
-        'voltageProtectionOff':          'SOURce:VOLTage:PROTection:STATe OFF',
-        'isVoltageProtectionTripped':    'SOURce:VOLTage:PROTection:TRIPped?',
-        'voltageProtectionClear':        'SOURce:VOLTage:PROTection:CLEar',
     }
 
     # Official SCPI numeric value for Not A Number
@@ -86,6 +63,7 @@ class SCPI(object):
     ErrorQueue = 10
     
     def __init__(self, resource, max_chan=1, wait=0,
+                 cmds = None,
                  cmd_prefix = '',
                  read_strip = '',
                  read_termination = '',
@@ -96,6 +74,7 @@ class SCPI(object):
         resource   - resource string or VISA descriptor, like TCPIP0::172.16.2.13::INSTR
         max_chan   - number of channels
         wait       - float that gives the default number of seconds to wait after sending each command
+        cmds       - a dictionary of cmds to overload the main cmd dictionary
         cmd_prefix - optional command prefix (ie. some instruments require a ':' prefix)
         read_strip        - optional read_strip parameter used to strip any returned termination characters
         read_termination  - optional read_termination parameter to pass to open_resource()
@@ -118,6 +97,11 @@ class SCPI(object):
         self._errorCmd = ("SYSTem:ERRor?", ("+0,", 0, 3)) # Command to get Errors and comparison of returned string that indicates no error
         self._defaultCheckErrors = False # By default do not check errors. Child classes can turn this on once they open()
         self._inst = None
+
+        if cmds is not None:
+            # update _SCPICmdTbl[] with commands from child
+            self._SCPICmdTbl.update(cmds)
+        
 
     def open(self):
         """Open a connection to the VISA device with PYVISA-py python library"""
@@ -485,14 +469,11 @@ class SCPI(object):
         self._versionUpdated()        
         
     def _Cmd(self, key):
-        """Lookup the needed command string. If child class has not defined it, then pull from local dictionary."""
-        if ('_xlateCmdTbl' in dir(self) and key in self._xlateCmdTbl):
-            # child class can create a dictionary named '_xlateCmdTbl' and add keys to translate for the specific hardware
-            return self._xlateCmdTbl[key]
-        else:
-            # not found in child class so pull from SCPI table
-            # NOTE: do not assume if in _SCPICmdTbl that is is an official SCPI command
-            return self._SCPICmdTbl[key]
+        """Lookup the needed command string from local dictionary."""
+        # NOTE: do not assume if in _SCPICmdTbl that is is an official SCPI command
+        if not key in SCPI._SCPICmdTbl:
+            raise RuntimeError('Unknown Command: "' + key + '"')
+        return SCPI._SCPICmdTbl[key]
         
     def idn(self):
         """Return response to *IDN? message"""
@@ -666,108 +647,9 @@ class SCPI(object):
             wait = self._wait
             
         str = cmd.format(self.channelStr(self.channel), value)
+        print(str)
         self._instWrite(str)
         sleep(wait)             # give some time for PS to respond
 
     
-    def setWaveType(self, wavetype, channel=None, wait=None, checkErrors=None):
-        """Set the wave type for the channel
-        
-           wavetype  - desired wave type as a string - allow instrument to handle error processing if string is wrong
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        # If SIGLENT, acceptable Wave Types are: SINE, SQUARE, RAMP, PULSE, NOISE, ARB, DC, PRBS
-        self._setGenericParameter(wavetype, self._Cmd('setWaveType'), channel, wait, checkErrors)
-
-    def setFrequency(self, frequency, channel=None, wait=None, checkErrors=None):
-        """Set the frequency for the channel
-        
-           frequency - desired frequency value as a floating point in Hz
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(frequency, self._Cmd('setFrequency'), channel, wait, checkErrors)
-
-    def setPeriod(self, period, channel=None, wait=None, checkErrors=None):
-        """Set the period for the channel
-        
-           period    - desired period as a floating point value in seconds
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(amplitude, self._Cmd('setAmplitude'), channel, wait, checkErrors)
-
-    def setAmplitude(self, amplitude, channel=None, wait=None, checkErrors=None):
-        """Set the voltage amplitude for the channel
-        
-           amplitude - desired voltage amplitude as a floating point value in Volts peak-to-peak
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(amplitude, self._Cmd('setAmplitude'), channel, wait, checkErrors)
-
-    def setOffset(self, offset, channel=None, wait=None, checkErrors=None):
-        """Set the voltage offset for the channel
-        
-           offset    - desired voltage offset as a floating point value in Volts
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(offset, self._Cmd('setOffset'), channel, wait, checkErrors)
-        
-    def setPhase(self, phase, channel=None, wait=None, checkErrors=None):
-        """Set the phase for the channel
-        
-           phase     - desired phase as a floating point in degrees (0-360)
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(phase%360, self._Cmd('setPhase'), channel, wait, checkErrors)
-
-    def setDuty(self, duty, channel=None, wait=None, checkErrors=None):
-        """Set the duty cycle for the channel
-        
-           duty      - desired duty as a floating point in % (0-100)
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(duty, self._Cmd('setDuty'), channel, wait, checkErrors)
-        
-    def setRise(self, rise, channel=None, wait=None, checkErrors=None):
-        """Set the rise time for the channel
-        
-           rise      - desired rise time as a floating point in seconds
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(rise, self._Cmd('setRise'), channel, wait, checkErrors)
-
-    def setFall(self, fall, channel=None, wait=None, checkErrors=None):
-        """Set the fall time for the channel
-        
-           fall      - desired fall time as a floating point in seconds
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(fall, self._Cmd('setFall'), channel, wait, checkErrors)
-        
-    def setDelay(self, delay, channel=None, wait=None, checkErrors=None):
-        """Set the pulse delay time for the channel
-        
-           delay     - desired pulse delay time as a floating point in seconds
-           wait      - number of seconds to wait after sending command
-           channel   - number of the channel starting at 1
-        """
-
-        self._setGenericParameter(delay, self._Cmd('setDelay'), channel, wait, checkErrors)
         

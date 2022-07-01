@@ -186,7 +186,7 @@ instr.close()
 This implements a small subset of available commands.
 
 For information on what is possible for the Siglent SDG6022X and other SDG series arbitrary waveform generators, see the
-[SDG Series Arbitrary Waveform Generator](https://siglentna.com/USA_website_2014/Documents/Program_Material/SDG_ProgrammingGuide_PG_E03B.pdf)
+[SDG Series Arbitrary Waveform Generator](https://siglentna.com//wp-content/uploads/dlm_uploads/2019/12/SDG_Programming-Guide_PG02-E04A.pdf)
 
 For what is possible with general instruments that adhere to the
 IEEE 488 SCPI specification, see the
