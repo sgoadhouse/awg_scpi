@@ -44,16 +44,53 @@ import pyvisa as visa
 class SCPI(object):
     """Basic class for controlling and accessing an Arbitrary Waveform Generator with Standard SCPI Commands"""
 
-    OverRange = +9.9E+37                  # Number which indicates Over Range (not sure if used)
-    UnderRange = -9.9E+37                 # Number which indicates Under Range (not sure if used)
-    ErrorQueue = 30                       # Size of error queue (not sure if used)
+    # Commands that can be "overloaded" by child classes if need a different syntax
+    _SCPICmdTbl = {
+        'setLocal':                      'SYSTem:LOCal',
+        'setRemote':                     'SYSTem:REMote',
+        'setRemoteLock':                 'SYSTem:RWLock ON',
+        'beeperOn':                      'SYSTem:BEEPer:STATe ON',
+        'beeperOff':                     'SYSTem:BEEPer:STATe OFF',
+        'isOutput':                      'OUTPut:STATe?',
+        'outputOn':                      'OUTPut:STATe ON',
+        'outputOff':                     'OUTPut:STATe OFF',
+
+        # From Siglent SDG series
+        'setWaveType':                   '{}:BSWV WVTP,{}',
+        'setFrequency':                  '{}:BSWV FRQ,{}',
+        'setPeriod':                     '{}:BSWV PERI,{}',
+        'setAmplitude':                  '{}:BSWV AMP,{}',
+        'setOffset':                     '{}:BSWV OFST,{}',
+        'setPhase':                      '{}:BSWV PHSE,{}',
+        'setDuty':                       '{}:BSWV DUTY,{}',
+        'setRise':                       '{}:BSWV RISE,{}',
+        'setFall':                       '{}:BSWV FALL,{}',
+        'setDelay':                      '{}:BSWV DLY,{}',
+        'setWaveParameters':             '{}:BSWV {}',
+        'queryWaveParameters':           '{}:BSWV?',
+
+        'measureVoltage':                'MEASure:VOLTage:DC?',
+        'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
+        'setVoltageProtectionDelay':     'SOURce:VOLTage:PROTection:DELay {}',
+        'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
+        'voltageProtectionOn':           'SOURce:VOLTage:PROTection:STATe ON',
+        'voltageProtectionOff':          'SOURce:VOLTage:PROTection:STATe OFF',
+        'isVoltageProtectionTripped':    'SOURce:VOLTage:PROTection:TRIPped?',
+        'voltageProtectionClear':        'SOURce:VOLTage:PROTection:CLEar',
+    }
+
+    # Official SCPI numeric value for Not A Number
+    NaN = 9.91E37
+
+    # Size of error queue
+    ErrorQueue = 10
     
     def __init__(self, resource, max_chan=1, wait=0,
-                     cmd_prefix = '',
-                     read_strip = '',
-                     read_termination = '',
-                     write_termination = '\n',
-                     timeout = 5000):
+                 cmd_prefix = '',
+                 read_strip = '',
+                 read_termination = '',
+                 write_termination = '\n',
+                 timeout = 5000):
         """Init the class with the instruments resource string
 
         resource   - resource string or VISA descriptor, like TCPIP0::172.16.2.13::INSTR
@@ -78,7 +115,8 @@ class SCPI(object):
         self._IDNserial = ''    # store instrument serial number from IDN here
         self._version = 0.0     # set software version to lowest value until it gets set
         self._versionLegacy = 0.0   # set software version which triggers Legacy code to lowest value until it gets set
-        self._legacyError = True    # Start off using Legacy Error method since both old and new instruments return something
+        self._errorCmd = ("SYSTem:ERRor?", ("+0,", 0, 3)) # Command to get Errors and comparison of returned string that indicates no error
+        self._defaultCheckErrors = False # By default do not check errors. Child classes can turn this on once they open()
         self._inst = None
 
     def open(self):
@@ -127,7 +165,11 @@ class SCPI(object):
     def channel(self, value):
         self._curr_chan = value
 
-    def _instQuery(self, queryStr, checkErrors=True):
+    def _instQuery(self, queryStr, checkErrors=None):
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
         if (queryStr[0] != '*'):
             queryStr = self._prefix + queryStr
         #print("QUERY:",queryStr)
@@ -146,10 +188,14 @@ class SCPI(object):
             self.checkInstErrors(queryStr)
         return result.rstrip(self._read_strip)
 
-    def _instQueryNumber(self, queryStr, checkErrors=True):
+    def _instQueryNumber(self, queryStr, checkErrors=None):
         return float(self._instQuery(queryStr, checkErrors))
 
-    def _instWrite(self, writeStr, checkErrors=True):
+    def _instWrite(self, writeStr, checkErrors=None):
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
         if (writeStr[0] != '*'):
             writeStr = self._prefix + writeStr
         #@@@print("WRITE:",writeStr)
@@ -189,6 +235,17 @@ class SCPI(object):
         except ValueError:
             return self._chanStr(channel)
 
+    def _chanNumber(self, str):
+        """Decode the response as a channel number and return it. Return 0 if string does not decode properly.
+        """
+
+        # Only check first character so do not need to deal with
+        # trailing whitespace and such
+        if str[:4] == 'CHAN':
+            return int(str[4])
+        else:
+            return 0
+
     def _onORoff(self, str):
         """Check if string says it is ON or OFF and return True if ON
         and False if OFF
@@ -213,17 +270,34 @@ class SCPI(object):
         else:
             return False
 
-    def _chanNumber(self, str):
-        """Decode the response as a channel number and return it. Return 0 if string does not decode properly.
+    def _bool2onORoff(self, bool):
+        """If bool is True, return ON string, else return OFF string. Use to
+        convert boolean input to ON or OFF string output.
         """
 
-        # Only check first character so do not need to deal with
-        # trailing whitespace and such
-        if str[:4] == 'CHAN':
-            return int(str[4])
+        if (bool):
+            return 'ON'
         else:
-            return 0
+            return 'OFF'
 
+    def _onORoff_1OR0_yesORno(self, str):
+        """Check if string says it is ON or OFF and return True if ON
+        and False if OFF OR check if '1' or '0' and return True for '1' 
+        OR check if 'YES' or 'NO' and return True for 'YES'
+        """
+
+        # trip out whitespace
+        str = str.strip()
+        
+        if str == 'ON':
+            return True
+        elif str == 'YES':
+            return True
+        elif str == '1':
+            return True
+        else:
+            return False
+        
     def _wait(self):
         """Wait until all preceeding commands complete"""
         #self._instWrite('*WAI')
@@ -246,15 +320,10 @@ class SCPI(object):
     # =========================================================
     def checkInstErrors(self, commandStr):
 
-        methodNew = ("SYSTem:ERRor? STRing", ("0,", 0, 2))
-        methodOld = ("SYSTem:ERRor?",        ("+0,", 0, 3))
-        if (not self._legacyError and self._version > self._versionLegacy):
-            cmd = methodNew[0]
-            noerr = methodNew[1]
-        else:
-            self._legacyError = True # indicate that using Legacy Error method
-            cmd = methodOld[0]
-            noerr = methodOld[1]
+        cmd = self._errorCmd[0]
+        noerr = self._errorCmd[1]
+
+        #@@@#print("cmd: {}  noerr: {}".format(cmd, noerr))
             
         errors = False
         # No need to read more times that the size of the Error Queue
@@ -264,42 +333,14 @@ class SCPI(object):
                 #@@@#print('Q: {}'.format(cmd))
                 error_string = self._instQuery(cmd, checkErrors=False)
             except visa.errors.VisaIOError as err:    
-                if (err.error_code == visa.constants.StatusCode.error_timeout and cmd is methodNew[0]):
-                    ## Older instruments may not understand a
-                    ## parameter after the '?' and will not respond
-                    ## resulting in a timeout. So, if trying the 'New'
-                    ## command and get a timeout, assume this is
-                    ## happening and try query again but modified for
-                    ## the Legacy way.
-                    ##
-                    ## NOTE: Since loop goes no further than
-                    ## self.ErrorQueue, will have 1 less possible loop
-                    ## but that is okay.
-                    cmd = methodOld[0]
-                    noerr = methodOld[1]
-                    # Also, set _legacyError to True to make
-                    # code use methodOld in subsequent calls
-                    self._legacyError = True # indicate that using Legacy Error method
-                    continue
-                else:
-                    print("Unexpected VisaIOError during checkInstErrors(): {}".format(err))
-                    errors = True # if unexpected response, then set as Error
-                    break
+                print("Unexpected VisaIOError during checkInstErrors(): {}".format(err))
+                errors = True # if unexpected response, then set as Error
+                break
                     
             error_string = error_string.strip()  # remove trailing and leading whitespace
             if error_string: # If there is an error string value.
                 if error_string.find(*noerr) == -1:
                     # Not "No error".
-                    #
-                    # First check if using Legacy Error command just
-                    # got an error code. If so, this is really a newer
-                    # instrument and so retry using New command format
-                    if (self._legacyError and error_string.isdigit()):
-                        cmd = methodNew[0]
-                        noerr = methodNew[1]
-                        self._legacyError = False # indicate that using New Error method
-                        continue
-                        
                     print("ERROR({:02d}): {}, command: '{}'".format(reads, error_string, commandStr))
                     errors = True           # indicate there was an error
                 else: # "No error"
@@ -316,7 +357,11 @@ class SCPI(object):
     # Based on do_query_ieee_block() from the MSO-X 3000 Programming
     # Guide and modified to work within this class ...
     # =========================================================
-    def _instQueryIEEEBlock(self, queryStr, checkErrors=True):
+    def _instQueryIEEEBlock(self, queryStr, checkErrors=None):
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
         if (queryStr[0] != '*'):
             queryStr = self._prefix + queryStr
         #print("QUERYIEEEBlock:",queryStr)
@@ -337,7 +382,11 @@ class SCPI(object):
     # Based on code from the MSO-X 3000 Programming
     # Guide and modified to work within this class ...
     # =========================================================
-    def _instQueryNumbers(self, queryStr, checkErrors=True):
+    def _instQueryNumbers(self, queryStr, checkErrors=None):
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
         if (queryStr[0] != '*'):
             queryStr = self._prefix + queryStr
         #print("QUERYNumbers:",queryStr)
@@ -358,7 +407,11 @@ class SCPI(object):
     # Based on do_command_ieee_block() from the MSO-X 3000 Programming
     # Guide and modified to work within this class ...
     # =========================================================
-    def _instWriteIEEEBlock(self, writeStr, values, checkErrors=True):
+    def _instWriteIEEEBlock(self, writeStr, values, checkErrors=None):
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
         if (writeStr[0] != '*'):
             writeStr = self._prefix + writeStr
         #print("WRITE:",writeStr)
@@ -383,7 +436,11 @@ class SCPI(object):
             self.checkInstErrors(writeStr)
         return result
 
-    def _instWriteIEEENumbers(self, writeStr, values, checkErrors=True):
+    def _instWriteIEEENumbers(self, writeStr, values, checkErrors=None):
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
         if (writeStr[0] != '*'):
             writeStr = self._prefix + writeStr
         #print("WRITE:",writeStr)
@@ -401,6 +458,10 @@ class SCPI(object):
             self.checkInstErrors(writeStr)
         return result
 
+    def _versionUpdated(self):
+        """Overload this function in child classes so can update parameters once the version number is known."""
+        pass
+    
     def _getID(self):
         """Query IDN data like Software Version to handle command history deviations. This is called from open()."""
         ## Skip Error check since handling of errors is version specific
@@ -419,6 +480,19 @@ class SCPI(object):
             ver[-1] = ver[-1].replace('\n', '')
             self._version = tuple(ver)
             self._versionLegacy = tuple()
+
+        # Allow a child's funciton to run to update data based on its version number
+        self._versionUpdated()        
+        
+    def _Cmd(self, key):
+        """Lookup the needed command string. If child class has not defined it, then pull from local dictionary."""
+        if ('_xlateCmdTbl' in dir(self) and key in self._xlateCmdTbl):
+            # child class can create a dictionary named '_xlateCmdTbl' and add keys to translate for the specific hardware
+            return self._xlateCmdTbl[key]
+        else:
+            # not found in child class so pull from SCPI table
+            # NOTE: do not assume if in _SCPICmdTbl that is is an official SCPI command
+            return self._SCPICmdTbl[key]
         
     def idn(self):
         """Return response to *IDN? message"""
@@ -438,16 +512,16 @@ class SCPI(object):
 
         # Not sure if this is SCPI, but it appears to be supported
         # across different instruments
-        self._instWrite('SYSTem:LOCK OFF')
-
+        self._instWrite(self._Cmd('setLocal'))
+    
     def setRemote(self):
         """Set the power supply to REMOTE mode where it is controlled via VISA
         """
 
         # Not sure if this is SCPI, but it appears to be supported
         # across different instruments
-        self._instWrite('SYSTem:LOCK ON')
-
+        self._instWrite(self._Cmd('setRemote'))
+    
     def setRemoteLock(self):
         """Set the power supply to REMOTE Lock mode where it is
            controlled via VISA & front panel is locked out
@@ -455,21 +529,19 @@ class SCPI(object):
 
         # Not sure if this is SCPI, but it appears to be supported
         # across different instruments
-        self._instWrite('SYSTem:LOCK ON')
+        self._instWrite(self._Cmd('setRemoteLock'))
 
     def beeperOn(self):
         """Enable the system beeper for the instrument"""
-        # no beeper to turn off, so make it do nothing
-        pass
-
+        self._instWrite(self._Cmd('beeperOn'))
+        
     def beeperOff(self):
         """Disable the system beeper for the instrument"""
-        # no beeper to turn off, so make it do nothing
-        pass
-
+        self._instWrite(self._Cmd('beeperOff'))
+        
     def isOutputOn(self, channel=None):
         """Return true if the output of channel is ON, else false
-
+        
            channel - number of the channel starting at 1
         """
 
@@ -477,14 +549,19 @@ class SCPI(object):
         # current channel
         if channel is not None:
             self.channel = channel
-
-        str = 'STATus? {}'.format(self.channelStr(self.channel))
+            
+        if (self._max_chan > 1 and channel is not None):
+            # If multi-channel device and channel parameter is passed, select it
+            self._instWrite(self._Cmd('chanSelect').format(self.channel))
+            
+        str = self._Cmd('isOutput')
         ret = self._instQuery(str)
-        return self._1OR0(ret)
-
+        # @@@print("1:", ret)
+        return self._onORoff_1OR0_yesORno(ret)
+    
     def outputOn(self, channel=None, wait=None):
         """Turn on the output for channel
-
+        
            wait    - number of seconds to wait after sending command
            channel - number of the channel starting at 1
         """
@@ -494,18 +571,22 @@ class SCPI(object):
         if channel is not None:
             self.channel = channel
 
+        if (self._max_chan > 1 and channel is not None):
+            # If multi-channel device and channel parameter is passed, select it
+            self._instWrite(self._Cmd('chanSelect').format(self.channel))
+                        
         # If a wait time is NOT passed in, set wait to the
         # default time
         if wait is None:
             wait = self._wait
-
-        str = 'VIEW {}'.format(self.channelStr(self.channel))
+            
+        str = self._Cmd('outputOn')
         self._instWrite(str)
-        sleep(wait)
-
+        sleep(wait)             # give some time for PS to respond
+    
     def outputOff(self, channel=None, wait=None):
         """Turn off the output for channel
-
+        
            channel - number of the channel starting at 1
         """
 
@@ -513,19 +594,23 @@ class SCPI(object):
         # current channel
         if channel is not None:
             self.channel = channel
-
+                    
+        if (self._max_chan > 1 and channel is not None):
+            # If multi-channel device and channel parameter is passed, select it
+            self._instWrite(self._Cmd('chanSelect').format(self.channel))
+            
         # If a wait time is NOT passed in, set wait to the
         # default time
         if wait is None:
             wait = self._wait
-
-        str = 'BLANK {}'.format(self.channelStr(self.channel))
+            
+        str = self._Cmd('outputOff')
         self._instWrite(str)
-        sleep(wait)
-
+        sleep(wait)             # give some time for PS to respond
+    
     def outputOnAll(self, wait=None):
         """Turn on the output for ALL channels
-
+        
         """
 
         # If a wait time is NOT passed in, set wait to the
@@ -534,14 +619,17 @@ class SCPI(object):
             wait = self._wait
 
         for chan in range(1,self._max_chan+1):
-            str = 'VIEW {}'.format(self.channelStr(chan))
-            self._instWrite(str)
-
-        sleep(wait)
-
+            if (self._max_chan > 1):
+                # If multi-channel device, select next channel
+                self._instWrite(self._Cmd('chanSelect').format(self.channel))
+            
+            str = self._Cmd('outputOn')
+            
+        sleep(wait)             # give some time for PS to respond
+    
     def outputOffAll(self, wait=None):
         """Turn off the output for ALL channels
-
+        
         """
 
         # If a wait time is NOT passed in, set wait to the
@@ -549,21 +637,21 @@ class SCPI(object):
         if wait is None:
             wait = self._wait
 
-        #for chan in range(1,self._max_chan+1):
-        #    str = 'BLANK {}'.format(self.channelStr(chan))
-        #    self._instWrite(str)
-
-        if (self._version > self._versionLegacy):
-            self._instWrite("BLANk ALL")
-        else:
-            # Turn off all channels (Legacy f/w take no parameter to blank all)
-            self._instWrite("BLANk")
-        
+        for chan in range(1,self._max_chan+1):
+            if (self._max_chan > 1):
+                # If multi-channel device, select next channel
+                self._instWrite(self._Cmd('chanSelect').format(self.channel))
+            
+            str = self._Cmd('outputOff')
+            
         sleep(wait)             # give some time for PS to respond
-
-    def measureVoltage(self, channel=None):
-        """Read and return a voltage measurement from channel
-
+    
+    def _setGenericParameter(self, value, cmd, channel=None, wait=None, checkErrors=None):
+        """Generic function to handle setting of parameters
+        
+           value   - value to set
+           cmd     - command string to use for setting the parameter
+           wait    - number of seconds to wait after sending command
            channel - number of the channel starting at 1
         """
 
@@ -571,7 +659,115 @@ class SCPI(object):
         # current channel
         if channel is not None:
             self.channel = channel
+            
+        # If a wait time is NOT passed in, set wait to the
+        # default time
+        if wait is None:
+            wait = self._wait
+            
+        str = cmd.format(self.channelStr(self.channel), value)
+        self._instWrite(str)
+        sleep(wait)             # give some time for PS to respond
 
-        str = 'INSTrument:NSELect {}; MEASure:VOLTage:DC?'.format(self.channel)
-        val = self._instQueryNumber(str)
-        return val
+    
+    def setWaveType(self, wavetype, channel=None, wait=None, checkErrors=None):
+        """Set the wave type for the channel
+        
+           wavetype  - desired wave type as a string - allow instrument to handle error processing if string is wrong
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        # If SIGLENT, acceptable Wave Types are: SINE, SQUARE, RAMP, PULSE, NOISE, ARB, DC, PRBS
+        self._setGenericParameter(wavetype, self._Cmd('setWaveType'), channel, wait, checkErrors)
+
+    def setFrequency(self, frequency, channel=None, wait=None, checkErrors=None):
+        """Set the frequency for the channel
+        
+           frequency - desired frequency value as a floating point in Hz
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(frequency, self._Cmd('setFrequency'), channel, wait, checkErrors)
+
+    def setPeriod(self, period, channel=None, wait=None, checkErrors=None):
+        """Set the period for the channel
+        
+           period    - desired period as a floating point value in seconds
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(amplitude, self._Cmd('setAmplitude'), channel, wait, checkErrors)
+
+    def setAmplitude(self, amplitude, channel=None, wait=None, checkErrors=None):
+        """Set the voltage amplitude for the channel
+        
+           amplitude - desired voltage amplitude as a floating point value in Volts peak-to-peak
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(amplitude, self._Cmd('setAmplitude'), channel, wait, checkErrors)
+
+    def setOffset(self, offset, channel=None, wait=None, checkErrors=None):
+        """Set the voltage offset for the channel
+        
+           offset    - desired voltage offset as a floating point value in Volts
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(offset, self._Cmd('setOffset'), channel, wait, checkErrors)
+        
+    def setPhase(self, phase, channel=None, wait=None, checkErrors=None):
+        """Set the phase for the channel
+        
+           phase     - desired phase as a floating point in degrees (0-360)
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(phase%360, self._Cmd('setPhase'), channel, wait, checkErrors)
+
+    def setDuty(self, duty, channel=None, wait=None, checkErrors=None):
+        """Set the duty cycle for the channel
+        
+           duty      - desired duty as a floating point in % (0-100)
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(duty, self._Cmd('setDuty'), channel, wait, checkErrors)
+        
+    def setRise(self, rise, channel=None, wait=None, checkErrors=None):
+        """Set the rise time for the channel
+        
+           rise      - desired rise time as a floating point in seconds
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(rise, self._Cmd('setRise'), channel, wait, checkErrors)
+
+    def setFall(self, fall, channel=None, wait=None, checkErrors=None):
+        """Set the fall time for the channel
+        
+           fall      - desired fall time as a floating point in seconds
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(fall, self._Cmd('setFall'), channel, wait, checkErrors)
+        
+    def setDelay(self, delay, channel=None, wait=None, checkErrors=None):
+        """Set the pulse delay time for the channel
+        
+           delay     - desired pulse delay time as a floating point in seconds
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(delay, self._Cmd('setDelay'), channel, wait, checkErrors)
+        

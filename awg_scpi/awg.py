@@ -53,7 +53,7 @@ class AWG(SCPI):
     """Base class for controlling and accessing an Arbitrary Waveform Generator with PyVISA and SCPI commands"""
 
     def __init__(self, resource, maxChannel=1, wait=0,
-                     cmd_prefix = ':',
+                     cmd_prefix = '',
                      read_strip = '\n',
                      read_termination = '',
                      write_termination = '\n'):
@@ -88,6 +88,10 @@ class AWG(SCPI):
 
         # Give the Series a name
         self._series = 'GENERIC'
+
+        # By default do not check errors. Child classes can turn this on once they open()        
+        self._defaultCheckErrors = False 
+        
         
     @property
     def chanAnaValidList(self):
@@ -168,12 +172,6 @@ class AWG(SCPI):
         return len(oscopeSetup)
 
 
-    def autoscale(self):
-        """ Autoscale Oscilloscope"""
-
-        self._instWrite("AUToscale")
-
-    
     def waveform(self, filename, channel=None, points=None):
         """Download waveform data of a selected channel into a csv file.
 
@@ -320,6 +318,7 @@ if __name__ == '__main__':
     ## fully defined by the child classes. Currently that is just
     ## Siglent AWGs.
 
+    from time import sleep    
     import argparse
     parser = argparse.ArgumentParser(description='Access and control an AWG')
     parser.add_argument('chan', nargs='?', type=int, help='Channel to access/control (starts at 1)', default=1)
@@ -328,97 +327,60 @@ if __name__ == '__main__':
     from os import environ
     resource = environ.get('AWG_IP', 'TCPIP0::172.16.2.13::INSTR')
     instr = AWG(resource)
+
+    ## Help to use with other models. Likely will not need these three
+    ## lines once get IDN strings from all known AWG that I
+    ## want to use
+    instr.open()
+    print('Potential SCPI Device: ' + instr.idn() + '\n')
+    instr.close()
+    
     ## Upgrade Object to best match based on IDN string
     instr = instr.getBestClass()
+    
+    ## Open this object and work with it
     instr.open()
 
-    #@@@# Stop here for now
-    return
+    print('Using SCPI Device:     ' + instr.idn() + ' of series: ' + instr.series + '\n')
+
+    #@@@@#print(instr._instQuery("SYSTem:ERRor? String", checkErrors=False))
+    #@@@@#print(instr._instWrite("C1:MDWV GM"))
     
     # set the channel (can pass channel to each method or just set it
     # once and it becomes the default for all following calls)
     instr.channel = str(args.chan)
 
     # Enable output of channel, if it is not already enabled
-    if not instr.isOutputOn():
-        instr.outputOn()
+    #if not instr.isOutputOn():
+    #    instr.outputOn()
 
-    # Install measurements to display in statistics display and also
-    # return their current values here
-    print('Ch. {} Settings: {:6.4e} V  PW {:6.4e} s\n'.
-              format(instr.channel, instr.measureVoltAverage(install=True),
-                         instr.measurePosPulseWidth(install=True)))
+    #if instr.isOutputOn():
+    #    instr.outputOff()
 
-    # Add an annotation to the screen before hardcopy
-    instr.annotate("{} {} {}".format('Example of Annotation','for Channel',instr.channel), 'ch1')
+    #instr.outputOnAll()
+    #sleep(2)
+    #instr.outputOffAll()
 
-    # Change label of the channel to "MySigx"
-    instr.channelLabel("MySig{}".format(instr.channel))
+    instr.beeperOn()
 
-    # Make sure the statistics display is showing for the hardcopy
-    instr.measureStatistics()
+    #@@@#print(instr._instQuery("C1:BSWV?"))
+    #@@@#instr._inst.write("C1:BSWV AMP,2.4")
+    #@@@#print(instr._instQuery("SYST:ERR?"))
+    #@@@#print(instr._instQuery("SYST:ERR?"))
 
-    # STOP AWG (not required for hardcopy - only showing example of how to do it)
-    instr.modeStop()
+    #@@@#sleep(5)
+
+    instr.setWaveType('SINE')
+    instr.setFrequency(34.4590897823e3)
+    instr.setAmplitude(3.2)
+    instr.setOffset(1.6)
+    instr.setPhase(0.45)
     
-    # Save a hardcopy of the screen to file 'outfile.png'
-    instr.hardcopy('outfile.png')
+    # turn on the channel
+    instr.outputOn()
 
-    # SINGLE mode (just an example)
-    instr.modeSingle()
+    sleep(5)
     
-    # Change label back to the default
-    #
-    # NOTE: can use instr.channelLabelOff() but showing an example of sending a SCPI command directly
-    instr._instWrite('DISPlay:LABel OFF')
-
-    # RUN mode (since demo Stop and Single, restore Run mode)
-    instr.modeRun()
-    
-    # Turn off the annotation
-    instr.annotateOff()
-
-    ## Read ALL available measurements from channel, without installing
-    ## to statistics display, with units
-    print('\nMeasurements for Ch. {}:'.format(instr.channel))
-    measurements = ['Bit Rate',
-                    'Burst Width',
-                    'Counter Freq',
-                    'Frequency',
-                    'Period',
-                    'Duty',
-                    'Neg Duty',
-                    '+ Width',
-                    '- Width',
-                    'Rise Time',
-                    'Num Rising',
-                    'Num Pos Pulses',
-                    'Fall Time',
-                    'Num Falling',
-                    'Num Neg Pulses',
-                    'Overshoot',
-                    'Preshoot',
-                    '',
-                    'Amplitude',
-                    'Pk-Pk',
-                    'Top',
-                    'Base',
-                    'Maximum',
-                    'Minimum',
-                    'Average - Full Screen',
-                    'RMS - Full Screen',
-                    ]
-    for meas in measurements:
-        if (meas == ''):
-            # use a blank string to put in an extra line
-            print()
-        else:
-            # using instr.measureTbl[] dictionary, call the
-            # appropriate method to read the measurement. Also, using
-            # the same measurement name, pass it to the polish() method
-            # to format the data with units and SI suffix.
-            print('{: <24} {:>12.6}'.format(meas,instr.polish(instr.measureTblCall(meas), meas)))
-
     # turn off the channel
     instr.outputOff()
 
