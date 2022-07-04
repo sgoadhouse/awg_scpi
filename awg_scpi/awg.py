@@ -60,6 +60,8 @@ class AWG(SCPI):
         'setFrequency':                  '{}:BSWV FRQ,{}',
         'setPeriod':                     '{}:BSWV PERI,{}',
         'setAmplitude':                  '{}:BSWV AMP,{}',
+        'setAmplitudeVrms':              '{}:BSWV AMPVRMS,{}',
+        'setAmplitudedBm':               '{}:BSWV AMPDBM,{}',
         'setOffset':                     '{}:BSWV OFST,{}',
         'setRampSymmetry':               '{}:BSWV SYM,{}',
         'setDutyCycle':                  '{}:BSWV DUTY,{}',
@@ -78,22 +80,30 @@ class AWG(SCPI):
         'setPRBSEdge':                   '{}:BSWV EDGE,{}',
         'setPRBSDiffState':              '{}:BSWV DIFFSTATE,{}',
         'setPRBSBitRate':                '{}:BSWV BITRATE,{}',
+        'setPRBSLogicLevel':             '{}:BSWV LOGICLEVEL,{}',
 
-        'setWaveParameters':             '{}:BSWV {}',
-        'queryWaveParameters':           '{}:BSWV?',
+        #'setWaveParameters':             '{}:BSWV {}',
+        #'queryWaveParameters':           '{}:BSWV?',
 
         'setOutputLoad':                 '{}:OUTP LOAD,{}',
         'setOutputPolarity':             '{}:OUTP PLRT,{}',
-        'setSignalPolarity':             '{}:INVT {}',
+        'setSignalPolarity':             '{}:INVT {}',                
         
-        'measureVoltage':                'MEASure:VOLTage:DC?',
+        # More standard SCPI command - here really as a test - siglent.py will override
         'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
-        'setVoltageProtectionDelay':     'SOURce:VOLTage:PROTection:DELay {}',
         'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
-        'voltageProtectionOn':           'SOURce:VOLTage:PROTection:STATe ON',
-        'voltageProtectionOff':          'SOURce:VOLTage:PROTection:STATe OFF',
-        'isVoltageProtectionTripped':    'SOURce:VOLTage:PROTection:TRIPped?',
-        'voltageProtectionClear':        'SOURce:VOLTage:PROTection:CLEar',
+
+        # Frequency Counter setup and measurements
+        'setFreqCntrOn':                 'FCNT STATE,ON',
+        'setFreqCntrOff':                'FCNT STATE,OFF',
+        'setFreqCntrReference':          'FCNT REFQ,{1}',
+        'setFreqCntrTrigLevel':          'FCNT TRG,{1}',
+        'setFreqCntrCoupleAC':           'FCNT MODE,AC',
+        'setFreqCntrCoupleDC':           'FCNT MODE,DC',
+        'setFreqCntrHFROn':              'FCNT HFR,ON',
+        'setFreqCntrHFROff':             'FCNT HFR,OFF',
+        'measureFreqCntr':               'FCNT?',
+        
     }
     
     def __init__(self, resource, maxChannel=1, wait=0,
@@ -148,6 +158,9 @@ class AWG(SCPI):
 
         # Set the list of valid Wave Type strings - these can be overriden by child objects as needed
         self._validWaveTypes = ["SINE"]
+
+        # Set the list of valid logic level strings - these can be overriden by child objects as needed
+        self._validLogicLevels = ["TTL", "CMOS"]
         
     @property
     def chanAnaValidList(self):
@@ -234,11 +247,12 @@ class AWG(SCPI):
     def setWaveType(self, wavetype, channel=None, wait=None, checkErrors=None):
         """Set the wave type for the channel
         
-           wavetype  - desired wave type as a string - allow instrument to handle error processing if string is wrong
+           wavetype  - desired wave type as a string
            wait      - number of seconds to wait after sending command
            channel   - number of the channel starting at 1
         """
 
+        wavetype = wavetype.upper() # make sure parameter is uppercase for comparison
         if not wavetype in self._validWaveTypes:
             raise ValueError('Requested wave type "' + wavetype + '" is not valid!')
                              
@@ -262,7 +276,7 @@ class AWG(SCPI):
            channel   - number of the channel starting at 1
         """
 
-        self._setGenericParameter(amplitude, self._Cmd('setAmplitude'), channel, wait, checkErrors)
+        self._setGenericParameter(period, self._Cmd('setPeriod'), channel, wait, checkErrors)
 
     def setAmplitude(self, amplitude, channel=None, wait=None, checkErrors=None):
         """Set the voltage amplitude for the channel
@@ -273,6 +287,26 @@ class AWG(SCPI):
         """
 
         self._setGenericParameter(amplitude, self._Cmd('setAmplitude'), channel, wait, checkErrors)
+
+    def setAmplitudeVrms(self, amplitude, channel=None, wait=None, checkErrors=None):
+        """Set the voltage amplitude for the channel in units Vrm
+        
+           amplitude - desired voltage amplitude as a floating point value in Volts RMS
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(amplitude, self._Cmd('setAmplitudeVrms'), channel, wait, checkErrors)
+
+    def setAmplitudedBm(self, amplitude, channel=None, wait=None, checkErrors=None):
+        """Set the voltage amplitude for the channel in units dBm
+        
+           amplitude - desired voltage amplitude as a floating point value in dBm
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(amplitude, self._Cmd('setAmplitudedBm'), channel, wait, checkErrors)
 
     def setOffset(self, offset, channel=None, wait=None, checkErrors=None):
         """Set the voltage offset for the channel
@@ -459,6 +493,64 @@ class AWG(SCPI):
 
         self._setGenericParameter(bitrate, self._Cmd('setPRBSBitRate'), channel, wait, checkErrors)
         
+    def setPRBSLogicLevel(self, logicLevel, channel=None, wait=None, checkErrors=None):
+        """Set the logic level for PRBS wave type for the channel
+        
+           logicLevel     - name of desired logic level
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+
+        logicLevel = logicLevel.upper() # make sure parameter is uppercase for comparison
+        if not logicLevel in self._validLogicLevels:
+            raise ValueError('Requested logic level "' + logicLevel + '" is not valid!')
+        
+        self._setGenericParameter(logicLevel, self._Cmd('setPRBSLogicLevel'), channel, wait, checkErrors)
+
+    def setVoltageProtection(self, ovp, delay=None, channel=None, wait=None):
+        """Set the over-voltage protection value for the channel
+        
+           ovp     - desired over-voltage value as a floating point number
+           delay   - desired voltage protection delay time in seconds [IGNORED HERE]
+           wait    - number of seconds to wait after sending command
+           channel - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(ovp, self._Cmd('setVoltageProtection'), channel, wait)
+                
+    def queryVoltageProtection(self, channel=None):
+        """query the over-voltage protection value for the channel
+        
+           channel - number of the channel starting at 1
+        """
+
+        return self._queryGenericParameter(self._Cmd('queryVoltageProtection'), channel)
+
+    # =========================================================
+    # Frequency Counter
+    #
+    # This is specific to the Siglent SDG series. Will likely need
+    # to rearrange code if add another AWG.
+    # =========================================================    
+    def setFreqCntrOn(self, channel=None, wait=None, checkErrors=None):
+        """Turn On/enable the frequency counter function.
+        
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+        
+        self._setGenericParameter(0, self._Cmd('setFreqCntrOn'), channel, wait, checkErrors)
+
+    def setFreqCntrOff(self, channel=None, wait=None, checkErrors=None):
+        """Turn Off/Disable the frequency counter function.
+        
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+        
+        self._setGenericParameter(0, self._Cmd('setFreqCntrOff'), channel, wait, checkErrors)
+
+    
     # =========================================================
     # Based on the save oscilloscope setup example from the MSO-X 3000 Programming
     # Guide and modified to work within this class ...
@@ -701,12 +793,19 @@ if __name__ == '__main__':
 
     #@@@#sleep(5)
 
+    # return to default parameters
+    instr.reset()               
+
     instr.setWaveType('SINE')
     instr.setFrequency(34.4590897823e3)
-    instr.setAmplitude(3.2)
+    instr.setVoltageProtection(3.3)
     instr.setOffset(1.6)
+    #@@@#instr.setAmplitudeVrms(1.0)
+    instr.setAmplitudedBm(0.8)
     instr.setPhase(0.45)
-    
+
+    print("Voltage Protection is set to maximum: {}".format(instr.queryVoltageProtection()))
+
     # turn on the channel
     instr.outputOn()
 
@@ -715,6 +814,14 @@ if __name__ == '__main__':
     # turn off the channel
     instr.outputOff()
 
+    if (True) :
+        # Test Frequency Counter functions
+        instr.setFreqCntrOn()
+
+        sleep(5)
+        
+        instr.setFreqCntrOff()        
+    
     if (False) :
         # return to default parameters
         instr.reset()               
@@ -750,6 +857,7 @@ if __name__ == '__main__':
         instr.setPRBSEdge(50e-9)
         #@@@#instr.setPRBSDiffState(1)
         instr.setPRBSBitRate(2.2e3)
+        instr.setPRBSLogicLevel("LVTTL_LVCMOS")
         
         # turn on the channel
         instr.outputOn()
@@ -765,13 +873,18 @@ if __name__ == '__main__':
     # Setup a different basic wave output
     instr.setWaveType('PULSE')
     instr.setFrequency(1e3)
-    instr.setOutputInverted(True) # Set first so setHighLevel() and setLowLevel() can help
+    instr.setOutputInverted(False)
     instr.setOutputLoad(False)
+    #@@@#instr.setOffset(1.6)
+    #@@@#instr.setAmplitude(3.2)
     instr.setHighLevel(3.1)
     instr.setLowLevel(0.2)
     instr.setPulseWidth(50e-9)
     instr.setPulseRise(2e-9)
     instr.setPulseFall(2e-9)
+    instr.setOutputInverted(True)
+
+    #@@@#print(instr._queryWaveParameters())
     
     # turn on the channel
     instr.outputOn()

@@ -60,23 +60,38 @@ class Siglent(AWG):
         'setFrequency':                  '{}:BSWV FRQ,{}',
         'setPeriod':                     '{}:BSWV PERI,{}',
         'setAmplitude':                  '{}:BSWV AMP,{}',
+        'setAmplitudeVrms':              '{}:BSWV AMPVRMS,{}',
+        'setAmplitudedBm':               '{}:BSWV AMPDBM,{}',
         'setOffset':                     '{}:BSWV OFST,{}',
-        'setPhase':                      '{}:BSWV PHSE,{}',
+        'setRampSymmetry':               '{}:BSWV SYM,{}',
         'setDutyCycle':                  '{}:BSWV DUTY,{}',
-        'setRise':                       '{}:BSWV RISE,{}',
-        'setFall':                       '{}:BSWV FALL,{}',
-        'setDelay':                      '{}:BSWV DLY,{}',
-        'setWaveParameters':             '{}:BSWV {}',
-        'queryWaveParameters':           '{}:BSWV?',
+        'setPhase':                      '{}:BSWV PHSE,{}',
+        'setNoiseStdDev':                '{}:BSWV STDEV,{}',
+        'setNoiseMean':                  '{}:BSWV MEAN,{}',
+        'setPulseWidth':                 '{}:BSWV WIDTH,{}',
+        'setPulseRise':                  '{}:BSWV RISE,{}',
+        'setPulseFall':                  '{}:BSWV FALL,{}',
+        'setPulseDelay':                 '{}:BSWV DLY,{}',
+        'setHighLevel':                  '{}:BSWV HLEV,{}',
+        'setLowLevel':                   '{}:BSWV LLEV,{}',
+        'setNoiseBandwidth':             '{}:BSWV BANDWIDTH,{}',
+        'setNoiseBandState':             '{}:BSWV BANDSTATE,{}',
+        'setPRBSBitLength':              '{}:BSWV LENGTH,{:d}',
+        'setPRBSEdge':                   '{}:BSWV EDGE,{}',
+        'setPRBSDiffState':              '{}:BSWV DIFFSTATE,{}',
+        'setPRBSBitRate':                '{}:BSWV BITRATE,{}',
+        'setPRBSLogicLevel':             '{}:BSWV LOGICLEVEL,{}',
 
+        #'setWaveParameters':             '{}:BSWV {}',
+        #'queryWaveParameters':           '{}:BSWV?',
+
+        'setOutputLoad':                 '{}:OUTP LOAD,{}',
+        'setOutputPolarity':             '{}:OUTP PLRT,{}',
+        'setSignalPolarity':             '{}:INVT {}',
+        
         'measureVoltage':                'MEASure:VOLTage:DC?',
-        'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
-        'setVoltageProtectionDelay':     'SOURce:VOLTage:PROTection:DELay {}',
-        'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
-        'voltageProtectionOn':           'SOURce:VOLTage:PROTection:STATe ON',
-        'voltageProtectionOff':          'SOURce:VOLTage:PROTection:STATe OFF',
-        'isVoltageProtectionTripped':    'SOURce:VOLTage:PROTection:TRIPped?',
-        'voltageProtectionClear':        'SOURce:VOLTage:PROTection:CLEar',
+
+        'setVoltageProtection':          '{}:BSWV MAX_OUTPUT_AMP,{}',
     }
     
     def __init__(self, resource, maxChannel=2, wait=0):
@@ -121,6 +136,9 @@ class Siglent(AWG):
 
         # If SIGLENT, these are the acceptable Wave Types
         self._validWaveTypes = ['SINE', 'SQUARE', 'RAMP', 'PULSE', 'NOISE', 'ARB', 'DC', 'PRBS']
+
+        # If SIGLENT, these are the acceptable logic level strings
+        self._validLogicLevels = ["TTL_CMOS", "LVTTL_LVCMOS", "ECL", "LVPECL", "LVDS"]
         
         # This will store annotation text if that feature is used
         self._annotationText = ''
@@ -163,7 +181,7 @@ class Siglent(AWG):
         pass
 
     def _queryOutput(self, channel=None):
-        """Perform an output query on the default channel and return a list of the returned parameters
+        """Perform an output query on the channel and return a list of the returned parameters
 
            order of returned parameters: ON|OFF,LOAD,50|HZ,PLRT,NOR|INVT
 
@@ -313,8 +331,120 @@ class Siglent(AWG):
         sleep(wait)             # give some time for PS to respond
 
     # ===========================================================================
+    # Query Basic Wave parameters and create a dictionary from the response
+    # ===========================================================================        
+    def _queryWaveParameters(self, channel=None):
+        """Perform an basic wave query on the channel and return a list of the returned parameters
+
+           expected order of returned parameters: WVTP,SINE,FRQ,100HZ,PERI,0.01S,AMP,2V,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
+
+           channel        - number of the channel starting at 1
+        """
+
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+        
+        str = '{}:BSWV'.format(self.channelStr(self.channel))
+        ret = self._instQuery(str+'?')
+        words = ret.split(' ')  # split by words with spaces
+
+        if(len(words) != 2 or words[0].strip() != str):
+            raise RuntimeError('Unexpected return string for BSWV? command: "' + ret + '"')
+
+        # convert the comma seperated list of parameters as a Python dictionary and make sure all letters are uppercase
+        param = words[1].strip().upper().split(',')
+        if(len(param)%2 != 0):
+            raise RuntimeError('Expected an even number of returned comma seperated words from BSWV? command:\n   "' + ret + '"')
+
+        it = iter(param)
+        ret_dict = dict(zip(it, it))
+
+        #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param, " ret_dict: ", ret_dict)
+        
+        return ret_dict
+
+    def queryOffset(self, channel=None, checkErrors=None):
+        """Query the voltage offset for the channel
+        
+           channel   - number of the channel starting at 1
+        """
+
+        resp = self._queryWaveParameters(channel)
+
+        # Return the value of OFST with unit, if it exists, removed and converted to a float
+        return(float(resp["OFST"].replace("V","")))
+    
+    def _queryMaxOutputAmp(self, channel=None, checkErrors=None):
+        """Query the maximum output voltage for the channel
+        
+           channel   - number of the channel starting at 1
+        """
+
+        resp = self._queryWaveParameters(channel)
+
+        # Return the value of MAX_OUTPUT_AMP with unit, if it exists, removed and converted to a float
+        return(float(resp["MAX_OUTPUT_AMP"].replace("V","")))
+    
+    # ===========================================================================
     # Help user with voltage output level when output is inverted - non-intuitive
     # ===========================================================================
+    def setOutputInverted(self, invert, channel=None, wait=None, checkErrors=None):
+        """Set the output inverted or not for the channel
+        
+           invert         - a boolean that if True will set output inverted, else normal
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+
+        if (invert):
+            invertStr = 'INVT'
+        else:
+            invertStr = 'NOR'
+            
+        self._setGenericParameter(invertStr, self._Cmd('setOutputPolarity'), channel, wait, checkErrors)
+
+        # now that have inverted the output, get the voltage offset and set it to -1* its current value.
+        # Do this by querying the Offset and then passing to setOffset() which will handle the -1*
+        offset = self.queryOffset(channel, checkErrors)
+        self.setOffset(offset, channel, wait, checkErrors)
+        
+    def setSignalInverted(self, invert, channel=None, wait=None, checkErrors=None):
+        """Set the signal inverted or not for the channel. This does the exact
+           same action as setOutputInverted() but uses a different command.
+        
+           invert         - a boolean that if True will set signal inverted, else normal
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+
+        """ 
+            
+        self._setGenericParameter(self._bool2onORoff(invert), self._Cmd('setSignalPolarity'), channel, wait, checkErrors)
+
+        # now that have inverted the output, get the voltage offset and set it to -1* its current value.
+        # Do this by querying the Offset and then passing to setOffset() which will handle the -1*
+        offset = self.queryOffset(channel, checkErrors)
+        self.setOffset(offset, channel, wait, checkErrors)
+        
+        
+    def setOffset(self, offset, channel=None, wait=None, checkErrors=None):
+        """Set the voltage offset for the channel
+        
+           offset    - desired voltage offset as a floating point value in Volts
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+
+        # First check if output is currently set to be inverted. If
+        # so, need to set offset to -1*offset so that offset
+        # will be the actual offset with inverted output
+        if self.isOutputInverted(channel):
+            self._setGenericParameter(-1*offset, self._Cmd('setOffset'), channel, wait, checkErrors)
+        else:
+            self._setGenericParameter(offset, self._Cmd('setOffset'), channel, wait, checkErrors)
+        
     def setHighLevel(self, highLevel, channel=None, wait=None, checkErrors=None):
         """Set the high voltage level for the channel
         
@@ -346,7 +476,18 @@ class Siglent(AWG):
             self._setGenericParameter(-1*lowLevel, self._Cmd('setHighLevel'), channel, wait, checkErrors)
         else:
             self._setGenericParameter(lowLevel, self._Cmd('setLowLevel'), channel, wait, checkErrors)
+
+    # =====================================================================================================
+    # To query parameters, must go through _queryWaveParameters() but need to know which string to look for
+    # =====================================================================================================
+    def queryVoltageProtection(self, channel=None):
+        """query the over-voltage protection value for the channel
         
+           channel - number of the channel starting at 1
+        """
+
+        return self._queryMaxOutputAmp(channel)
+
             
     # =========================================================
     # Check for instrument errors:
@@ -374,16 +515,21 @@ class Siglent(AWG):
                     # Not "No error".
                     #
                     # However, for some unknown reason, the BSWV
-                    # command and OUTP command ALWAYS returns -108
+                    # command, FCNT and OUTP commands ALWAYS returns -108
                     # error code so if see that, ignore
+                    #
+                    # FCNT has no channel name before it but the others do
                     if error_string.find("-108,", 0, 5) != -1:
                         cmdWords = commandStr.split(' ')
                         cmdParts = cmdWords[0].strip().lower().split(':')
-                        if (len(cmdParts) == 2 and
-                            (cmdParts[1] == 'bswv'
-                             or cmdParts[1] == 'basic_wave'
-                             or cmdParts[1] == 'outp'
-                             or cmdParts[1] == 'output')):
+                        if ((len(cmdParts) == 1 and
+                             (cmdParts[0] == 'fcnt'
+                              or cmdParts[0] == 'freqcounter')) or
+                            (len(cmdParts) == 2 and
+                             (cmdParts[1] == 'bswv'
+                              or cmdParts[1] == 'basic_wave'
+                              or cmdParts[1] == 'outp'
+                              or cmdParts[1] == 'output'))):
                             break
                         
                     print("ERROR({:02d}): {}, command: '{}'".format(reads, error_string, commandStr))

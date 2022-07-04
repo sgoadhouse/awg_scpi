@@ -648,8 +648,25 @@ class SCPI(object):
             
         str = cmd.format(self.channelStr(self.channel), value)
         print(str)
-        self._instWrite(str)
+        self._instWrite(str, checkErrors)
         sleep(wait)             # give some time for PS to respond
+
+    def _queryGenericParameter(self, cmd, channel=None, checkErrors=None):
+        """Generic function to handle query of parameters
+        
+           cmd     - command string to use for the query
+           channel - number of the channel starting at 1
+        """
+
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+            
+        str = cmd.format(self.channelStr(self.channel))
+        #@@@#print(str)
+        ret = self._instQuery(str, checkErrors)
+        return float(ret)
 
     
         
