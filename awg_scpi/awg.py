@@ -49,8 +49,6 @@ except Exception:
 import json
 
 from quantiphy import Quantity
-import numpy as np
-import csv
 
 class AWG(SCPI):
     """Base class for controlling and accessing an Arbitrary Waveform Generator with PyVISA and SCPI commands"""
@@ -833,120 +831,6 @@ class AWG(SCPI):
         return sz
 
 
-    def waveform(self, filename, channel=None, points=None):
-        """Download waveform data of a selected channel into a csv file.
-
-        NOTE: This is a LEGACY function to prevent breaking API but it
-        is deprecated so use above waveform functions instead.
-
-        NOTE: Now that newer oscilloscopes have very large data
-        downloads, csv file format is not a good format for storing
-        because the files are so large that the convenience of csv
-        files has diminishing returns. They are too large for Excel to
-        load and are only useful from a scripting system like Python
-        or MATLAB or Root. See waveformSaveNPZ() for a better option.
-
-        filename - base filename to store the data
-
-        channel  - channel, as string, to be measured - set to None to use the default channel
-
-        points   - number of points to capture - if None, captures all available points
-                   for newer devices, the captured points are centered around the center of the display
-
-        """
-
-        # Acquire the data (also sets self.channel)
-        (x, y, header, meta) = self.waveformData(channel, points)
-
-        # Save to CSV file
-        return self.waveformSaveCSV(filename, x, y, header)
-    
-    
-    def waveformSaveCSV(self, filename, x, y, header=None, meta=None):
-        """
-        filename - base filename to store the data
-
-        x        - time data to write in first column
-
-        y        - vertical data: expected to be a list of columns to write and can be any number of columns
-
-        header   - a list of header strings, one for each column of data - set to None for no header
-
-        meta     - a list of meta data for waveform data - optional and not used by this function - only here to be like other waveformSave functions
-
-        """
-
-        nLength = len(x)
-
-        print('Writing data to CSV file. Please wait...')
-        
-        # Save waveform data values to CSV file.
-        # Determine iterator
-        if (nLength == len(y)):
-            # Simply single column of y data
-            it = zip(x,y)
-        else:
-            # Multiple columns in y, so break them out
-            it = zip(x,*y)
-            
-        # Open file for output. Only output x & y for simplicity. User
-        # will have to copy paste the meta data printed to the
-        # terminal
-        myFile = open(filename, 'w')
-        with myFile:
-            writer = csv.writer(myFile, dialect='excel', quoting=csv.QUOTE_NONNUMERIC)
-            if header is not None:
-                writer.writerow(header)
-                
-            writer.writerows(it)
-                    
-        # return number of entries written
-        return nLength
-
-    
-    def waveformSaveNPZ(self, filename, x, y, header=None, meta=None):
-        """
-        filename - base filename to store the data
-
-        x        - time data to write in first column
-
-        y        - vertical data: expected to be a list of columns to write and can be any number of columns
-
-        header   - a list of header strings, one for each column of data - set to None for no header
-
-        meta     - a list of meta data for waveform data
-
-        A NPZ file is an uncompressed zip file of the arrays x, y and optionally header and meta if supplied. 
-        To load and use the data from python:
-
-        import numpy as np
-        header=None
-        meta=None
-        with np.load(filename) as data:
-            x = data['x']
-            y = data['y']
-            if 'header' in data.files:
-                header = data['header']
-            if 'meta' in data.files:
-                meta = data['meta']
-
-        """
-
-        nLength = len(x)
-
-        print('Writing data to Numpy NPZ file. Please wait...')
-
-        arrays = {'x': x, 'y': y}
-        if (header is not None):
-            arrays['header']=header
-        if (meta is not None):
-            arrays['meta']=meta
-        np.savez(filename, **arrays)
-        
-        # return number of entries written
-        return nLength
-
-    
     ## This is a dictionary of measurement labels with their units. It
     ## is blank here and it is expected that this get defined by child
     ## classes.
@@ -954,7 +838,7 @@ class AWG(SCPI):
     
 
     def polish(self, value, measure=None):
-        """ Using the QuantiPhy package, return a value that is in apparopriate Si units.
+        """ Using the QuantiPhy package, return a value that is in appropriate Si units.
 
         If value is >= self.OverRange, then return the invalid string instead of a Quantity().
 
