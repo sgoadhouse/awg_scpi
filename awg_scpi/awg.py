@@ -36,6 +36,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from time import sleep
 import sys
 import os
 
@@ -44,6 +45,8 @@ try:
 except Exception:
     sys.path.append(os.getcwd())
     from scpi import SCPI
+
+import json
 
 from quantiphy import Quantity
 import numpy as np
@@ -721,42 +724,113 @@ class AWG(SCPI):
         return self._onORoff_1OR0_yesORno(fcnt['HFR'])
     
     # =========================================================
-    # Based on the save oscilloscope setup example from the MSO-X 3000 Programming
-    # Guide and modified to work within this class ...
+    # Currently only specific to Siglent SDG series
     # =========================================================
     def setupSave(self, filename):
-        """ Fetch the oscilloscope setup and save to a file with given filename. """
+        """ Fetch the AWG setup and save to a JSON formatted file with given filename. """
 
-        oscopeSetup = self._instQueryIEEEBlock("SYSTem:SETup?")
+        # Save the default channel since it will change as we step through channels
+        defChan = self.channel
 
-        # Save setup to file.
-        f = open(filename, "wb")
-        f.write(oscopeSetup)
+        setup = []
+        for chan in range(1,self._max_chan+1):
+            cmds = {}
+            
+            # Get the OUTP? query response
+            outp = self._queryOutput(chan)
+            # Create an iterator but skip the first parameter which is ON or OFF
+            it = iter(outp[1:])
+            # Convert the other parameters into a dictionary
+            cmds['OUTP'] = dict(zip(it,it))
+
+            # Get BSWV? query as a dictionary
+            cmds['BSWV'] = self._queryWaveParameters(chan)
+
+            setup.append(cmds)
+
+        # restore the default channel
+        self.channel = defChan
+            
+        # open file to save within
+        f = open(filename, "w")
+
+        # write as a JSON formatted string
+        json.dump(setup,f,sort_keys=True)
+
+        sz = f.tell()
+        
+        # close the file
         f.close()
 
-        #print('Oscilloscope Setup bytes saved: {} to "{}"'.format(len(oscopeSetup),filename))
-
         # Return number of bytes saved to file
-        return len(oscopeSetup)
+        return sz
 
     # =========================================================
-    # Based on the loading a previous setup example from the MSO-X 3000 Programming
-    # Guide and modified to work within this class ...
+    # Currently only specific to Siglent SDG series
     # =========================================================
-    def setupLoad(self, filename):
-        """ Restore the oscilloscope setup from file with given filename. """
+    def setupLoad(self, filename, wait=None):
+        """ Restore the AWG setup from the JSON formatted file with given filename. """
 
         # Load setup from file.
-        f = open(filename, "rb")
-        oscopeSetup = f.read()
+        f = open(filename, "r")
+
+        setup = json.load(f)
+        
+        sz = f.tell()
+        
+        # close the file
         f.close()
 
-        #print('Oscilloscope Setup bytes loaded: {} from "{}"'.format(len(oscopeSetup),filename))
+        ## Reset the AWG and setup the OUTP and BSWV parameters from setup[]
+        self.reset()               
 
-        self._instWriteIEEEBlock("SYSTem:SETup ", oscopeSetup)
+        if (len(setup) > self._max_chan):
+            raise RuntimeError('Attempting to load a setup with {} channels into a device with only {} channels'.format(len(setup),self._max_chan))
+        
+        # If a wait time is NOT passed in, set wait to the
+        # default time
+        if wait is None:
+            wait = self._wait
+        
+        # Save the default channel since it will change as we step through channels
+        defChan = self.channel
 
+        for idx,chanSetup in enumerate(setup):
+            # chan is 1-based so need to convert from 0-based idx
+            chan = idx+1
+
+            # make sure output is OFF before we go changing a bunch of parameters
+            self.outputOff(chan)
+
+            for cmd in chanSetup:
+                # Get list of keys
+                params = list(chanSetup[cmd].keys())
+
+                if cmd == 'BSWV':
+                    # If cmd is BSWV, must write WVTP wave type first
+                    # so that AWG will allow the parameters specific
+                    # to that type.
+                    try:
+                        # Remove 'WVTP' so can move it to the front of the list
+                        params.remove('WVTP')
+                    except ValueError:
+                        # remove() raises ValueError if 'WVTP' is not in params
+                        raise RuntimeError('No WVTP parameter saved for BSWV command - inconceivable!')
+                    # Put 'WVTP' at the front of the list
+                    params.insert(0,'WVTP') 
+
+                # Write all cmd parameters. 
+                for param in params:
+                    str = '{}:{} {},{}'.format(self.channelStr(chan),cmd,param,chanSetup[cmd][param])
+                    #@@@#print(str)
+                    self._instWrite(str)
+                    sleep(wait)
+
+        # restore the default channel
+        self.channel = defChan
+        
         # Return number of bytes saved to file
-        return len(oscopeSetup)
+        return sz
 
 
     def waveform(self, filename, channel=None, points=None):
@@ -1087,6 +1161,7 @@ if __name__ == '__main__':
         
     # return to default parameters
     instr.reset()               
+    instr.setVoltageProtection(3.2)
 
     # reset the default channel
     instr.channel = str(args.chan)
@@ -1110,14 +1185,27 @@ if __name__ == '__main__':
     # turn on the channel
     instr.outputOn()
 
+    instr.setupSave("testSetup.json")
+    
+    sleep(5)
+
+    # Setup a different basic wave output (NOTE: output is ON)
+    instr.setWaveType('PRBS')
+    instr.setHighLevel(2.2)
+    instr.setLowLevel(0)        
+    instr.setPRBSBitLength(3)
+
+    sleep(2)
+
+    print()
+    # Now Load setup as a test (with Output still on (should go off)
+    instr.setupLoad("testSetup.json", wait=0.0)
+
     sleep(5)
     
     # turn off the channel
     instr.outputOff()
 
-    # return to default parameters
-    #@@@#instr.reset()               
-    
     # return to LOCAL mode
     instr.setLocal()
 

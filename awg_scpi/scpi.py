@@ -647,7 +647,7 @@ class SCPI(object):
             wait = self._wait
             
         str = cmd.format(self.channelStr(self.channel), value)
-        print(str)
+        #@@@#print(str)
         self._instWrite(str, checkErrors)
         sleep(wait)             # give some time for PS to respond
 
