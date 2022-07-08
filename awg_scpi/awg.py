@@ -100,8 +100,8 @@ class AWG(SCPI):
         'setFreqCntrTrigLevel':          'FCNT TRG,{1}',
         'setFreqCntrCoupleAC':           'FCNT MODE,AC',
         'setFreqCntrCoupleDC':           'FCNT MODE,DC',
-        'setFreqCntrHFROn':              'FCNT HFR,ON',
-        'setFreqCntrHFROff':             'FCNT HFR,OFF',
+        'setFreqCntrHfrOn':              'FCNT HFR,ON',
+        'setFreqCntrHfrOff':             'FCNT HFR,OFF',
         'measureFreqCntr':               'FCNT?',
         
     }
@@ -550,6 +550,175 @@ class AWG(SCPI):
         
         self._setGenericParameter(0, self._Cmd('setFreqCntrOff'), channel, wait, checkErrors)
 
+    def setFreqCntrReference(self, refFreq, channel=None, wait=None, checkErrors=None):
+        """Set the reference frequency for the frequency counter to computer frequency deviation
+        
+           refFreq   - desired reference frequency value as a floating point in Hz
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(refFreq, self._Cmd('setFreqCntrReference'), channel, wait, checkErrors)
+
+    def setFreqCntrTrigLevel(self, trigLevel, channel=None, wait=None, checkErrors=None):
+        """Set the trigger voltage level for the frequency counter
+        
+           trigLevel - desired trigger voltage level as a floating point in Volts
+           wait      - number of seconds to wait after sending command
+           channel   - number of the channel starting at 1
+        """
+
+        self._setGenericParameter(trigLevel, self._Cmd('setFreqCntrTrigLevel'), channel, wait, checkErrors)
+    
+    def setFreqCntrCoupleDC(self, channel=None, wait=None, checkErrors=None):
+        """Set input coupling mode of the frequency counter to DC
+        
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+        
+        self._setGenericParameter(0, self._Cmd('setFreqCntrCoupleDC'), channel, wait, checkErrors)
+
+    def setFreqCntrCoupleAC(self, channel=None, wait=None, checkErrors=None):
+        """Set input coupling mode of the frequency counter to AC
+        
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+        
+        self._setGenericParameter(0, self._Cmd('setFreqCntrCoupleAC'), channel, wait, checkErrors)
+
+    def setFreqCntrHfrOn(self, channel=None, wait=None, checkErrors=None):
+        """Enable the High Frequency Rejection (i.e. low pass filter) for the frequency counter function.
+        
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+        
+        self._setGenericParameter(0, self._Cmd('setFreqCntrHfrOn'), channel, wait, checkErrors)
+
+    def setFreqCntrHfrOff(self, channel=None, wait=None, checkErrors=None):
+        """Disable the High Frequency Rejection (i.e. low pass filter) for the frequency counter function.
+        
+           wait           - number of seconds to wait after sending command
+           channel        - number of the channel starting at 1
+        """ 
+        
+        self._setGenericParameter(0, self._Cmd('setFreqCntrHfrOff'), channel, wait, checkErrors)
+
+    def isFreqCntrOn(self, channel=None):
+        """Return true if Frequency Counter is ON, else false
+        
+           channel - number of the channel starting at 1
+        """
+
+        # If a channel number is passed in, make it the
+        # current channel
+        # NOTE: Frequency Counter has no channel so this is ignored although default gets updated
+        if channel is not None:
+            self.channel = channel
+
+        fcnt = self._queryFreqCntr(channel)
+            
+        return self._onORoff_1OR0_yesORno(fcnt['STATE'])
+    
+    def measureFreqCntrFrequency(self, channel=None):
+        """query and return the measured frequency of the Counter input
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+
+        # be sure to strip off the unit string before converting to float()
+        return float(fcnt['FRQ'].upper().rstrip('HZ'))
+        
+    def measureFreqCntrPosWidth(self, channel=None):
+        """query and return the measured positive width of the Counter input
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+        
+        # be sure to strip off the unit string before converting to float()
+        return float(fcnt['PW'].upper().rstrip('S'))
+        
+    def measureFreqCntrNegWidth(self, channel=None):
+        """query and return the measured negative width of the Counter input
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+        
+        # be sure to strip off the unit string before converting to float()
+        return float(fcnt['NW'].upper().rstrip('S'))
+        
+    def measureFreqCntrDutyCycle(self, channel=None):
+        """query and return the measured duty cycle of the Counter input
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+
+        # do not expect a unit suffix
+        return float(fcnt['DUTY'])
+        
+    def measureFreqCntrFrequencyDeviation(self, channel=None):
+        """query and return the measured frequency deviation of the Counter input
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+        
+        # be sure to strip off the unit string before converting to float()
+        return float(fcnt['FRQDEV'].upper().rstrip('PM'))
+        
+    def queryFreqCntrReference(self, channel=None):
+        """query and return the set reference frequency
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+        
+        # be sure to strip off the unit string before converting to float()
+        return float(fcnt['REFQ'].upper().rstrip('HZ'))
+        
+    def queryFreqCntrTrigLevel(self, channel=None):
+        """query and return the set trigger level
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+        
+        # be sure to strip off the unit string before converting to float()
+        return float(fcnt['TRG'].upper().rstrip('V'))
+
+    def isFreqCntrCoupleDC(self, channel=None):
+        """query the coupling mode - return True if DC, else False (if AC)
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+
+        resp = fcnt['MODE'].upper()
+        return (resp == "DC")
+
+    def isFreqCntrHfrON(self, channel=None):
+        """query the high frequency rejection state (i.e. low pass filter)
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+
+        return self._onORoff_1OR0_yesORno(fcnt['HFR'])
     
     # =========================================================
     # Based on the save oscilloscope setup example from the MSO-X 3000 Programming
@@ -814,14 +983,63 @@ if __name__ == '__main__':
     # turn off the channel
     instr.outputOff()
 
-    if (True) :
+    if (False) :
         # Test Frequency Counter functions
-        instr.setFreqCntrOn()
-
-        sleep(5)
+        #
+        # First, provide a signal to count
+        instr.setWaveType('SINE', 2)
+        instr.setFrequency(40.0789e6)
+        instr.setVoltageProtection(4.8) # input is max 5 Vpp
+        instr.setOffset(0)
+        instr.setAmplitude(2.4)
+        instr.setOutputLoad(False)
         
+        # turn on the channel
+        instr.outputOn()
+        
+        instr.setFreqCntrOn()
+        instr.setFreqCntrReference(40e6)
+        instr.setFreqCntrTrigLevel(1.0)
+        instr.setFreqCntrCoupleDC()
+        instr.setFreqCntrHfrOff()
+
+        print("\nFrequency Counter is {}".format(instr.isFreqCntrOn() and "ON" or "OFF"))
+        print("Ref Freq: {}Hz  Trig Lvl: {}V  Couple: {}  HFR: {}".format(
+            instr.queryFreqCntrReference(), instr.queryFreqCntrTrigLevel(),
+            instr.isFreqCntrCoupleDC() and "DC" or "AC", instr.isFreqCntrHfrON() and "ON" or "OFF"))
+        
+        for t in range(1,10):
+            print("Freq: {}Hz  PW: {}S  NW: {}S  Duty: {}%  Freq. Dev. {}ppm".format(
+                instr.measureFreqCntrFrequency(),
+                instr.measureFreqCntrPosWidth(),
+                instr.measureFreqCntrNegWidth(),
+                instr.measureFreqCntrDutyCycle(),
+                instr.measureFreqCntrFrequencyDeviation()))
+        
+        sleep(5)
+
+        instr.setFreqCntrTrigLevel(0)
+        instr.setFreqCntrCoupleAC()
+        instr.setFreqCntrHfrOn()
+
+        print("\nFrequency Counter is {}".format(instr.isFreqCntrOn() and "ON" or "OFF"))
+        print("Ref Freq: {}Hz  Trig Lvl: {}V  Couple: {}  HFR: {}".format(
+            instr.queryFreqCntrReference(), instr.queryFreqCntrTrigLevel(),
+            instr.isFreqCntrCoupleDC() and "DC" or "AC", instr.isFreqCntrHfrON() and "ON" or "OFF"))
+        
+        for t in range(1,10):
+            print("Freq: {}Hz  PW: {}S  NW: {}S  Duty: {}%  Freq. Dev. {}ppm".format(
+                instr.measureFreqCntrFrequency(),
+                instr.measureFreqCntrPosWidth(),
+                instr.measureFreqCntrNegWidth(),
+                instr.measureFreqCntrDutyCycle(),
+                instr.measureFreqCntrFrequencyDeviation()))
+        
+        sleep(5)
+
         instr.setFreqCntrOff()        
-    
+        print("\nFrequency Counter is {}".format(instr.isFreqCntrOn() and "ON" or "OFF"))
+        
     if (False) :
         # return to default parameters
         instr.reset()               
@@ -870,6 +1088,9 @@ if __name__ == '__main__':
     # return to default parameters
     instr.reset()               
 
+    # reset the default channel
+    instr.channel = str(args.chan)
+    
     # Setup a different basic wave output
     instr.setWaveType('PULSE')
     instr.setFrequency(1e3)

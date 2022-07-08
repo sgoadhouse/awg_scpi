@@ -656,6 +656,8 @@ class SCPI(object):
         
            cmd     - command string to use for the query
            channel - number of the channel starting at 1
+           checkErrors - If True, Check for SCPI Errors, else don't bother
+                         if None, use self._defaultCheckErrors
         """
 
         # If a channel number is passed in, make it the
@@ -665,8 +667,51 @@ class SCPI(object):
             
         str = cmd.format(self.channelStr(self.channel))
         #@@@#print(str)
+        
         ret = self._instQuery(str, checkErrors)
         return float(ret)
 
+    def _queryGenericFloat(self, cmd, channel=None, checkErrors=None):
+        """Generic function to Perform a SCPI Query and return the value as a float
+        
+           cmd     - command string to use for the query
+           channel - number of the channel starting at 1
+           checkErrors - If True, Check for SCPI Errors, else don't bother
+                         if None, use self._defaultCheckErrors
+        """
+        
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+            
+        str = cmd.format(self.channelStr(self.channel))
+        #@@@#print(str)
+            
+        ret = self._instQuery(str, checkErrors)
+        return float(ret)
+    
+    def _queryGenericBool(self, cmd, channel=None, checkErrors=None):
+        """Generic function to Perform a SCPI Query and return the value as a boolean
+           "ON", "1" or "YES" returns True
+           "OFF", "0" or "NO" returns False
+        
+           cmd     - command string to use for the query
+           channel - number of the channel starting at 1
+           checkErrors - If True, Check for SCPI Errors, else don't bother
+                         if None, use self._defaultCheckErrors
+        """
+        
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+            
+        str = cmd.format(self.channelStr(self.channel))
+        #@@@#print(str)
+            
+        ret = self._instQuery(str, checkErrors)
+        return self._onORoff_1OR0_yesORno(ret)
+    
     
         

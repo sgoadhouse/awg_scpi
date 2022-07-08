@@ -334,9 +334,9 @@ class Siglent(AWG):
     # Query Basic Wave parameters and create a dictionary from the response
     # ===========================================================================        
     def _queryWaveParameters(self, channel=None):
-        """Perform an basic wave query on the channel and return a list of the returned parameters
+        """Perform an basic wave query on the channel and return a dictionary of the returned parameters
 
-           expected order of returned parameters: WVTP,SINE,FRQ,100HZ,PERI,0.01S,AMP,2V,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
+           expected returned parameters: WVTP,SINE,FRQ,100HZ,PERI,0.01S,AMP,2V,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
 
            channel        - number of the channel starting at 1
         """
@@ -357,6 +357,41 @@ class Siglent(AWG):
         param = words[1].strip().upper().split(',')
         if(len(param)%2 != 0):
             raise RuntimeError('Expected an even number of returned comma seperated words from BSWV? command:\n   "' + ret + '"')
+
+        it = iter(param)
+        ret_dict = dict(zip(it, it))
+
+        #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param, " ret_dict: ", ret_dict)
+        
+        return ret_dict
+
+    # ===========================================================================
+    # Query Frequency Counter and return a dictionary from the response
+    # ===========================================================================        
+    def _queryFreqCntr(self, channel=None):
+        """Perform a frequency counter query query on the channel and return a dictionary of the returned parameters
+
+           expected returned parameters: STATE,FRQ,DUTY,REFQ,TRG,PW,NW,FRQDEV,MODE,HFR
+
+           channel        - number of the channel starting at 1
+        """
+
+        # If a channel number is passed in, make it the
+        # current channel - however, SIGLENT Frequency Counter has no Channel so it is ignored
+        if channel is not None:
+            self.channel = channel
+        
+        str = 'FCNT'
+        ret = self._instQuery(str+'?')
+        words = ret.split(' ')  # split by words with spaces
+
+        if(len(words) != 2 or words[0].strip() != str):
+            raise RuntimeError('Unexpected return string for FCNT? command: "' + ret + '"')
+
+        # convert the comma seperated list of parameters as a Python dictionary and make sure all letters are uppercase
+        param = words[1].strip().upper().split(',')
+        if(len(param)%2 != 0):
+            raise RuntimeError('Expected an even number of returned comma seperated words from FCNT? command:\n   "' + ret + '"')
 
         it = iter(param)
         ret_dict = dict(zip(it, it))
