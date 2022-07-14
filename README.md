@@ -18,11 +18,17 @@ then contact me for details in how to add those.
 
 # Installation
 
+The bible for installing Python packages is:
+https://packaging.python.org/en/latest/tutorials/installing-packages/
+Ultimately, consult that page for how to install this package. If you
+prefer to try commands that worked when this package was written, go
+ahead and give the following a try.
+
 To install the awg-scpi package, clone this GIT repository and then
 run the following command in the top level folder:
 
 ```
-python setup.py install
+python -m pip install .
 ```
 
 Alternatively, can add a path to this package to the environment
@@ -41,14 +47,10 @@ pip install awg_scpi
 ## Requirements
 * [argparse](https://docs.python.org/3/library/argparse.html) 
 * [python](http://www.python.org/)
-   * pyvisa no longer supports python 2.7+ so neither does this package - use older version of [MSOX3000](https://github.com/sgoadhouse/msox3000) if need python 2.7+
+   * pyvisa no longer supports python 2.7+ so neither does this package
 * [pyvisa 1.11.3](https://pyvisa.readthedocs.io/en/stable/)
 * [pyvisa-py 0.5.2](https://pyvisa-py.readthedocs.io/en/latest/) 
 * [quantiphy 2.3.0](http://quantiphy.readthedocs.io/en/stable/) 
-
-In order to run the example script `awg.py`, you will also need to manually install:
-* [matplotlib 3.3.4](https://matplotlib.org)
-   * If cannot install `matplotlib` on your system, see the comments in `awg.py` on how to modify it to work without `matplotlib`. 
 
 With the use of pyvisa-py, you should not have to install the National
 Instruments VISA driver.
@@ -61,7 +63,7 @@ ones that improve productivity like saving and loading configuration.
 
 Currently, this is a list of the features that are supported so far:
 
-* Nothing YET
+* _needs to be updated_
 
 It is expected that new interfaces will be added over time to control
 and automate the AWG. The key features that would be good to
@@ -76,9 +78,8 @@ supply a channel. The channel value is a string or can also be a list
 of strings, in the case of setupAutoscale(). Currently, the valid
 channel values are:
 
-NOTE: NEED TO UPDATE THE FOLLOWING LIST
-* '1' or CHAN1 for analog channel 1
-* '2' or CHAN2 for analog channel 2
+* '1' for analog channel 1
+* '2' for analog channel 2
 
 ## Usage and Examples
 The code is a basic class for controlling and accessing the
@@ -103,6 +104,8 @@ awg.py -h
 A basic example that sets up a basic wave and enables the output.
 
 ```python
+from awg_scpi import AWG
+
 from time import sleep    
 import argparse
 parser = argparse.ArgumentParser(description='Access and control an AWG')
@@ -137,12 +140,12 @@ instr.reset()
 
 instr.setWaveType('SINE')
 instr.setFrequency(34.4590897823e3)
-instr.setVoltageProtection(3.3)
+instr.setVoltageProtection(6.6)
+instr.setAmplitude(3.2)
 instr.setOffset(1.6)
-instr.setAmplitudedBm(0.8)
 instr.setPhase(0.45)
 
-print("Voltage Protection is set to maximum: {}".format(instr.queryVoltageProtection()))
+print("Voltage Protection is set to maximum: {}V Amplitude (assumes 0V offset)".format(instr.queryVoltageProtection()))
 
 # turn on the channel
 instr.outputOn()
