@@ -40,10 +40,6 @@ pip install awg_scpi
 
 ## Requirements
 * [argparse](https://docs.python.org/3/library/argparse.html) 
-* [numpy 1.19.5](https://numpy.org/)
-   * if installing on python 3.6 or 3.7, numpy 1.19.5 will be installed
-   * if installing on python 3.8+, then the latest numpy will be installed
-      * Up to numpy 1.22.3 has been verified
 * [python](http://www.python.org/)
    * pyvisa no longer supports python 2.7+ so neither does this package - use older version of [MSOX3000](https://github.com/sgoadhouse/msox3000) if need python 2.7+
 * [pyvisa 1.11.3](https://pyvisa.readthedocs.io/en/stable/)
@@ -104,77 +100,52 @@ For more detailed examples, see:
 awg.py -h
 ```
 
-NOTE: THE EXAMPLE NEEDS UPDATING!
-A basic example that installs a few measurements to the statistics
-display, adds some annotations and signal labels and then saves a
-hardcopy to a file.
+A basic example that sets up a basic wave and enables the output.
 
 ```python
-# Lookup environment variable AWG_IP and use it as the resource
-# name or use the TCPIP0 string if the environment variable does
-# not exist
-from awg_scpi import AWG
+from time import sleep    
+import argparse
+parser = argparse.ArgumentParser(description='Access and control an AWG')
+parser.add_argument('chan', nargs='?', type=int, help='Channel to access/control (starts at 1)', default=1)
+args = parser.parse_args()
+
 from os import environ
 resource = environ.get('AWG_IP', 'TCPIP0::172.16.2.13::INSTR')
-
-# create your visa instrument
 instr = AWG(resource)
 
-# Upgrade Object to best match based on IDN string
+## Upgrade Object to best match based on IDN string
 instr = instr.getBestClass()
 
-# Open connection to instrument
+## Open this object and work with it
 instr.open()
 
-# set to channel 1
-#
-# NOTE: can pass channel to each method or just set it
-# once and it becomes the default for all following calls. If pass the
-# channel to a Class method call, it will become the default for
-# following method calls.
-instr.channel = '1'
+print('Using SCPI Device:     ' + instr.idn() + ' of series: ' + instr.series + '\n')
 
-# Enable output of channel, if it is not already enabled
-if not instr.isOutputOn():
-    instr.outputOn()
+# set the channel (can pass channel to each method or just set it
+# once and it becomes the default for all following calls)
+instr.channel = str(args.chan)
 
-# Install measurements to display in statistics display and also
-# return their current values here
-print('Ch. {} Settings: {:6.4e} V  PW {:6.4e} s\n'.
-          format(instr.channel, instr.measureVoltAverage(install=True),
-                     instr.measurePosPulseWidth(install=True)))
+if instr.isOutputHiZ(instr.channel):
+    print("Output High Impedance")
+else:
+    print("Output 50 ohm load")
 
-# Add an annotation to the screen before hardcopy
-instr.annotate("{} {} {}".format('Example of Annotation','for Channel',instr.channel), 'ch1')
+instr.beeperOn()
 
-# Change label of the channel to "MySig1"
-instr.channelLabel('MySig1')
+# return to default parameters
+instr.reset()               
 
-# Make sure the statistics display is showing for the hardcopy
-instr.measureStatistics()
+instr.setWaveType('SINE')
+instr.setFrequency(34.4590897823e3)
+instr.setVoltageProtection(3.3)
+instr.setOffset(1.6)
+instr.setAmplitudedBm(0.8)
+instr.setPhase(0.45)
 
-# STOP AWG (not required for hardcopy - only showing example of how to do it)
-instr.modeStop()
+print("Voltage Protection is set to maximum: {}".format(instr.queryVoltageProtection()))
 
-# Save a hardcopy of the screen to file 'outfile.png'
-instr.hardcopy('outfile.png')
-
-# SINGLE mode (just an example)
-instr.modeSingle()
-
-# Change label back to the default
-#
-# NOTE: can use instr.channelLabelOff() but showing an example of sending a SCPI command directly
-instr._instWrite('DISPlay:LABel OFF')
-
-# RUN mode (since demo Stop and Single, restore Run mode)
-instr.modeRun()
-
-# Turn off the annotation
-instr.annotateOff()
-    
-# turn off the channel
-instr.outputOff()
+# turn on the channel
+instr.outputOn()
 
 # return to LOCAL mode
 instr.setLocal()

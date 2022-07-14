@@ -35,9 +35,7 @@ setuptools.setup(name="awg_scpi",
                      'pyvisa>=1.11.3',
                      'pyvisa-py>=0.5.2',
                      'argparse',
-                     'QuantiPhy>=2.3.0',
-                     'numpy>=1.19.5; python_version>="3.8"',
-                     'numpy==1.19.5; python_version<"3.8"'
+                     'QuantiPhy>=2.3.0'
                  ],
                  python_requires='>=3.6',
                  packages=setuptools.find_packages(),
