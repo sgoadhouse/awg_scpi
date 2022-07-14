@@ -53,60 +53,6 @@ from quantiphy import Quantity
 class AWG(SCPI):
     """Base class for controlling and accessing an Arbitrary Waveform Generator with PyVISA and SCPI commands"""
 
-    # "Overload" _SCPICmdTbl[] in parent with these comands
-    _AWGCmdTbl = {
-
-        # From Siglent SDG series - first {} is channel name, second {} is the value
-        'setWaveType':                   '{}:BSWV WVTP,{}',
-        'setFrequency':                  '{}:BSWV FRQ,{}',
-        'setPeriod':                     '{}:BSWV PERI,{}',
-        'setAmplitude':                  '{}:BSWV AMP,{}',
-        'setAmplitudeVrms':              '{}:BSWV AMPVRMS,{}',
-        'setAmplitudedBm':               '{}:BSWV AMPDBM,{}',
-        'setOffset':                     '{}:BSWV OFST,{}',
-        'setRampSymmetry':               '{}:BSWV SYM,{}',
-        'setDutyCycle':                  '{}:BSWV DUTY,{}',
-        'setPhase':                      '{}:BSWV PHSE,{}',
-        'setNoiseStdDev':                '{}:BSWV STDEV,{}',
-        'setNoiseMean':                  '{}:BSWV MEAN,{}',
-        'setPulseWidth':                 '{}:BSWV WIDTH,{}',
-        'setPulseRise':                  '{}:BSWV RISE,{}',
-        'setPulseFall':                  '{}:BSWV FALL,{}',
-        'setPulseDelay':                 '{}:BSWV DLY,{}',
-        'setHighLevel':                  '{}:BSWV HLEV,{}',
-        'setLowLevel':                   '{}:BSWV LLEV,{}',
-        'setNoiseBandwidth':             '{}:BSWV BANDWIDTH,{}',
-        'setNoiseBandState':             '{}:BSWV BANDSTATE,{}',
-        'setPRBSBitLength':              '{}:BSWV LENGTH,{:d}',
-        'setPRBSEdge':                   '{}:BSWV EDGE,{}',
-        'setPRBSDiffState':              '{}:BSWV DIFFSTATE,{}',
-        'setPRBSBitRate':                '{}:BSWV BITRATE,{}',
-        'setPRBSLogicLevel':             '{}:BSWV LOGICLEVEL,{}',
-
-        #'setWaveParameters':             '{}:BSWV {}',
-        #'queryWaveParameters':           '{}:BSWV?',
-
-        'setOutputLoad':                 '{}:OUTP LOAD,{}',
-        'setOutputPolarity':             '{}:OUTP PLRT,{}',
-        'setSignalPolarity':             '{}:INVT {}',                
-        
-        # More standard SCPI command - here really as a test - siglent.py will override
-        'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
-        'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
-
-        # Frequency Counter setup and measurements
-        'setFreqCntrOn':                 'FCNT STATE,ON',
-        'setFreqCntrOff':                'FCNT STATE,OFF',
-        'setFreqCntrReference':          'FCNT REFQ,{1}',
-        'setFreqCntrTrigLevel':          'FCNT TRG,{1}',
-        'setFreqCntrCoupleAC':           'FCNT MODE,AC',
-        'setFreqCntrCoupleDC':           'FCNT MODE,DC',
-        'setFreqCntrHfrOn':              'FCNT HFR,ON',
-        'setFreqCntrHfrOff':             'FCNT HFR,OFF',
-        'measureFreqCntr':               'FCNT?',
-        
-    }
-    
     def __init__(self, resource, maxChannel=1, wait=0,
                  cmds = None,
                  cmd_prefix = '',
@@ -125,22 +71,77 @@ class AWG(SCPI):
         write_termination - optional write_termination parameter to pass to open_resource()
         """
 
+        # "Overload" _SCPICmdTbl[] in parent with these commands.
+        #
+        # This is local to the __init__() function because it is used
+        # to update the master _SCPICmdTbl[] and is no longer needed
+        # after __init__() executes.
+        _AWGCmdTbl = {
+
+            # From Siglent SDG series - first {} is channel name, second {} is the value
+            'setWaveType':                   '{}:BSWV WVTP,{}',
+            'setFrequency':                  '{}:BSWV FRQ,{}',
+            'setPeriod':                     '{}:BSWV PERI,{}',
+            'setAmplitude':                  '{}:BSWV AMP,{}',
+            'setAmplitudeVrms':              '{}:BSWV AMPVRMS,{}',
+            'setAmplitudedBm':               '{}:BSWV AMPDBM,{}',
+            'setOffset':                     '{}:BSWV OFST,{}',
+            'setRampSymmetry':               '{}:BSWV SYM,{}',
+            'setDutyCycle':                  '{}:BSWV DUTY,{}',
+            'setPhase':                      '{}:BSWV PHSE,{}',
+            'setNoiseStdDev':                '{}:BSWV STDEV,{}',
+            'setNoiseMean':                  '{}:BSWV MEAN,{}',
+            'setPulseWidth':                 '{}:BSWV WIDTH,{}',
+            'setPulseRise':                  '{}:BSWV RISE,{}',
+            'setPulseFall':                  '{}:BSWV FALL,{}',
+            'setPulseDelay':                 '{}:BSWV DLY,{}',
+            'setHighLevel':                  '{}:BSWV HLEV,{}',
+            'setLowLevel':                   '{}:BSWV LLEV,{}',
+            'setNoiseBandwidth':             '{}:BSWV BANDWIDTH,{}',
+            'setNoiseBandState':             '{}:BSWV BANDSTATE,{}',
+            'setPRBSBitLength':              '{}:BSWV LENGTH,{:d}',
+            'setPRBSEdge':                   '{}:BSWV EDGE,{}',
+            'setPRBSDiffState':              '{}:BSWV DIFFSTATE,{}',
+            'setPRBSBitRate':                '{}:BSWV BITRATE,{}',
+            'setPRBSLogicLevel':             '{}:BSWV LOGICLEVEL,{}',
+
+            #'setWaveParameters':             '{}:BSWV {}',
+            #'queryWaveParameters':           '{}:BSWV?',
+
+            'setOutputLoad':                 '{}:OUTP LOAD,{}',
+            'setOutputPolarity':             '{}:OUTP PLRT,{}',
+            'setSignalPolarity':             '{}:INVT {}',                
+            
+            # More standard SCPI command - here really as a test - siglent.py will override
+            'setVoltageProtection':          'SOURce:VOLTage:PROTection:LEVel {}',
+            'queryVoltageProtection':        'SOURce:VOLTage:PROTection:LEVel?',
+
+            # Frequency Counter setup and measurements
+            'setFreqCntrOn':                 'FCNT STATE,ON',
+            'setFreqCntrOff':                'FCNT STATE,OFF',
+            'setFreqCntrReference':          'FCNT REFQ,{1}',
+            'setFreqCntrTrigLevel':          'FCNT TRG,{1}',
+            'setFreqCntrCoupleAC':           'FCNT MODE,AC',
+            'setFreqCntrCoupleDC':           'FCNT MODE,DC',
+            'setFreqCntrHfrOn':              'FCNT HFR,ON',
+            'setFreqCntrHfrOff':             'FCNT HFR,OFF',
+            'measureFreqCntr':               'FCNT?',
+            
+        }
+        
         if cmds is not None:
             # update _AWGCmdTbl[] with commands from child
-            self._AWGCmdTbl.update(cmds)
-        
+            _AWGCmdTbl.update(cmds)
+
         # NOTE: maxChannel is accessible in this package via parent as: self._max_chan
         super(AWG, self).__init__(resource, max_chan=maxChannel, wait=wait,
-                                  cmds=self._AWGCmdTbl,
+                                  cmds=_AWGCmdTbl,
                                   cmd_prefix=cmd_prefix,
                                   read_strip=read_strip,
                                   read_termination=read_termination,
                                   write_termination=write_termination
         )
 
-        # No longer need _AWGCmdTbl[] so delete it
-        del AWG._AWGCmdTbl
-        
         # Return list of valid analog channel strings.
         self._chanAnaValidList = [str(x) for x in range(1,self._max_chan+1)]
 
@@ -677,6 +678,25 @@ class AWG(SCPI):
         
         # be sure to strip off the unit string before converting to float()
         return float(fcnt['FRQDEV'].upper().rstrip('PM'))
+        
+    def measureFreqCntrAll(self, channel=None):
+        """query and return ALL measured values from Frequency Counter in a dictionary
+        
+           channel - number of the channel starting at 1
+        """
+
+        fcnt = self._queryFreqCntr(channel)
+        param = ["FRQ", "PW", "NW", "DUTY", "FRQDEV"]
+        unitStrip = ["HZ", "S", "S", "", "PM"]
+
+        # zip param and unitStrip together so that iterator puts the
+        # next param in x[0] and next unitStrip in x[1].
+        # Therefore, param and unitStrip must be the same length
+        vals = {}
+        for x in zip(param,unitStrip):
+            vals[x[0]] = float(fcnt[x[0]].upper().rstrip(x[1])) 
+        
+        return vals
         
     def queryFreqCntrReference(self, channel=None):
         """query and return the set reference frequency

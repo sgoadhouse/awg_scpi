@@ -58,7 +58,8 @@ class SCPI(object):
 
     # Official SCPI numeric value for Not A Number
     NaN = 9.91E37
-
+    OverRange = NaN
+    
     # Size of error queue
     ErrorQueue = 10
     
@@ -100,7 +101,7 @@ class SCPI(object):
 
         if cmds is not None:
             # update _SCPICmdTbl[] with commands from child
-            self._SCPICmdTbl.update(cmds)
+            SCPI._SCPICmdTbl.update(cmds)
         
 
     def open(self):

@@ -50,48 +50,6 @@ import pyvisa as visa
 class Siglent(AWG):
     """Child class of AWG for controlling and accessing a Siglent Arbitrary Waveform Generator with PyVISA and SCPI commands"""
 
-    # "Overload" _SCPICmdTbl[] in parent with these comands
-    _SiglentCmdTbl = {
-        'beeperOn':                      'BUZZ ON',
-        'beeperOff':                     'BUZZ OFF',
-
-        # first {} is channel name, second {} is the value
-        'setWaveType':                   '{}:BSWV WVTP,{}',
-        'setFrequency':                  '{}:BSWV FRQ,{}',
-        'setPeriod':                     '{}:BSWV PERI,{}',
-        'setAmplitude':                  '{}:BSWV AMP,{}',
-        'setAmplitudeVrms':              '{}:BSWV AMPVRMS,{}',
-        'setAmplitudedBm':               '{}:BSWV AMPDBM,{}',
-        'setOffset':                     '{}:BSWV OFST,{}',
-        'setRampSymmetry':               '{}:BSWV SYM,{}',
-        'setDutyCycle':                  '{}:BSWV DUTY,{}',
-        'setPhase':                      '{}:BSWV PHSE,{}',
-        'setNoiseStdDev':                '{}:BSWV STDEV,{}',
-        'setNoiseMean':                  '{}:BSWV MEAN,{}',
-        'setPulseWidth':                 '{}:BSWV WIDTH,{}',
-        'setPulseRise':                  '{}:BSWV RISE,{}',
-        'setPulseFall':                  '{}:BSWV FALL,{}',
-        'setPulseDelay':                 '{}:BSWV DLY,{}',
-        'setHighLevel':                  '{}:BSWV HLEV,{}',
-        'setLowLevel':                   '{}:BSWV LLEV,{}',
-        'setNoiseBandwidth':             '{}:BSWV BANDWIDTH,{}',
-        'setNoiseBandState':             '{}:BSWV BANDSTATE,{}',
-        'setPRBSBitLength':              '{}:BSWV LENGTH,{:d}',
-        'setPRBSEdge':                   '{}:BSWV EDGE,{}',
-        'setPRBSDiffState':              '{}:BSWV DIFFSTATE,{}',
-        'setPRBSBitRate':                '{}:BSWV BITRATE,{}',
-        'setPRBSLogicLevel':             '{}:BSWV LOGICLEVEL,{}',
-
-        #'setWaveParameters':             '{}:BSWV {}',
-        #'queryWaveParameters':           '{}:BSWV?',
-
-        'setOutputLoad':                 '{}:OUTP LOAD,{}',
-        'setOutputPolarity':             '{}:OUTP PLRT,{}',
-        'setSignalPolarity':             '{}:INVT {}',
-        
-        'setVoltageProtection':          '{}:BSWV MAX_OUTPUT_AMP,{}',
-    }
-    
     def __init__(self, resource, maxChannel=2, wait=0):
         """Init the class with the instruments resource string
 
@@ -99,17 +57,61 @@ class Siglent(AWG):
         maxChannel - number of channels of this AWG
         wait       - float that gives the default number of seconds to wait after sending each command
         """
+
+        # "Overload" _SCPICmdTbl[] in parent with these comands
+        #
+        # This is local to the __init__() function because it is used
+        # to update the master _SCPICmdTbl[] and is no longer needed
+        # after __init__() executes.
+        _SiglentCmdTbl = {
+            'beeperOn':                      'BUZZ ON',
+            'beeperOff':                     'BUZZ OFF',
+
+            # first {} is channel name, second {} is the value
+            'setWaveType':                   '{}:BSWV WVTP,{}',
+            'setFrequency':                  '{}:BSWV FRQ,{}',
+            'setPeriod':                     '{}:BSWV PERI,{}',
+            'setAmplitude':                  '{}:BSWV AMP,{}',
+            'setAmplitudeVrms':              '{}:BSWV AMPVRMS,{}',
+            'setAmplitudedBm':               '{}:BSWV AMPDBM,{}',
+            'setOffset':                     '{}:BSWV OFST,{}',
+            'setRampSymmetry':               '{}:BSWV SYM,{}',
+            'setDutyCycle':                  '{}:BSWV DUTY,{}',
+            'setPhase':                      '{}:BSWV PHSE,{}',
+            'setNoiseStdDev':                '{}:BSWV STDEV,{}',
+            'setNoiseMean':                  '{}:BSWV MEAN,{}',
+            'setPulseWidth':                 '{}:BSWV WIDTH,{}',
+            'setPulseRise':                  '{}:BSWV RISE,{}',
+            'setPulseFall':                  '{}:BSWV FALL,{}',
+            'setPulseDelay':                 '{}:BSWV DLY,{}',
+            'setHighLevel':                  '{}:BSWV HLEV,{}',
+            'setLowLevel':                   '{}:BSWV LLEV,{}',
+            'setNoiseBandwidth':             '{}:BSWV BANDWIDTH,{}',
+            'setNoiseBandState':             '{}:BSWV BANDSTATE,{}',
+            'setPRBSBitLength':              '{}:BSWV LENGTH,{:d}',
+            'setPRBSEdge':                   '{}:BSWV EDGE,{}',
+            'setPRBSDiffState':              '{}:BSWV DIFFSTATE,{}',
+            'setPRBSBitRate':                '{}:BSWV BITRATE,{}',
+            'setPRBSLogicLevel':             '{}:BSWV LOGICLEVEL,{}',
+
+            #'setWaveParameters':             '{}:BSWV {}',
+            #'queryWaveParameters':           '{}:BSWV?',
+
+            'setOutputLoad':                 '{}:OUTP LOAD,{}',
+            'setOutputPolarity':             '{}:OUTP PLRT,{}',
+            'setSignalPolarity':             '{}:INVT {}',
+            
+            'setVoltageProtection':          '{}:BSWV MAX_OUTPUT_AMP,{}',
+        }
+
         # NOTE: maxChannel is accessible in this package via parent as: self._max_chan
         super(Siglent, self).__init__(resource, maxChannel, wait,
-                                      cmds=self._SiglentCmdTbl,
+                                      cmds=_SiglentCmdTbl,
                                       cmd_prefix='',
                                       read_strip='\n',
                                       read_termination='',
                                       write_termination='\n'
         )
-
-        # No longer need _AWGCmdTbl[] so delete it
-        del Siglent._SiglentCmdTbl
 
         # Return list of valid analog channel strings. These are numbers.
         self._chanAnaValidList = [str(x) for x in range(1,self._max_chan+1)]
