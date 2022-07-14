@@ -95,8 +95,8 @@ def parse(awg):
     parser = argparse.ArgumentParser(description='Access Arbitrary Waveform Generator via SCPI')
 
     mutex_grp = parser.add_mutually_exclusive_group(required=True)    
-    mutex_grp.add_argument('--setup_save', '-s', metavar='outfile.stp', help='save the current Basic Wave setup of the AWG into the named file')
-    mutex_grp.add_argument('--setup_load', '-l', metavar='infile.stp', help='load the current Basic Wave setup of the AWG from the named file')
+    mutex_grp.add_argument('--setup_save', '-s', metavar='outfile.jstp', help='save the current Basic Wave setup of the AWG into the named file')
+    mutex_grp.add_argument('--setup_load', '-l', metavar='infile.jstp', help='load the current Basic Wave setup of the AWG from the named file')
     mutex_grp.add_argument('--counter',    '-f', action='store_true', help='Enable the Frequency Counter and output measured values until Ctrl-C')
 
     # Print help if no options are given on the command line
