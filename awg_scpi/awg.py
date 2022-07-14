@@ -764,6 +764,9 @@ class AWG(SCPI):
             # Get BSWV? query as a dictionary
             cmds['BSWV'] = self._queryWaveParameters(chan)
 
+            if cmds['BSWV']['WVTP'] == 'ARB':
+                raise ValueError('The AWG module does not support saving the setup for waveform type "ARB"')
+
             setup.append(cmds)
 
         # restore the default channel
@@ -813,18 +816,66 @@ class AWG(SCPI):
         # Save the default channel since it will change as we step through channels
         defChan = self.channel
 
+        # make sure output is OFF on all channel before we go changing a bunch of parameters
+        self.outputOffAll()
+
+        # init diffstate.
+        diffstate = False
+        
         for idx,chanSetup in enumerate(setup):
             # chan is 1-based so need to convert from 0-based idx
             chan = idx+1
 
-            # make sure output is OFF before we go changing a bunch of parameters
-            self.outputOff(chan)
-
-            for cmd in chanSetup:
+            # If diffstate is found to be enabled, skip any even
+            # channels since they should be setup with the first one            
+            if diffstate and chan%2 == 0:
+                continue
+            
+            cmdList = list(chanSetup.keys())
+            # make sure all upper case for comparisons
+            cmdList = [x.upper() for x in cmdList]
+            if 'OUTP' in cmdList:
+                # Make sure that OUTP is the first cmd because if
+                # output is 50 ohms or inverted, these should be set
+                # before setting th BSWV parameters since they will
+                # get interpreted differently.
+                cmdList.insert(0, cmdList.pop(cmdList.index('OUTP')))
+            elif 'OUTPUT' in cmdList:
+                # command could be long form so check for OUTPUT
+                cmdList.insert(0, cmdList.pop(cmdList.index('OUTPUT')))
+            
+            for cmd in cmdList:
                 # Get list of keys
                 params = list(chanSetup[cmd].keys())
 
+                # make sure all upper case for comparisons
+                params = [x.upper() for x in params]
+                
                 if cmd == 'BSWV':
+                    # If cmd is BSWV, must write DIFFSTATE, if it
+                    # exists, third so that any output voltage
+                    # parameters get put on both channels.
+                    #
+                    # NOTE: inserting at the front so that following
+                    # commands can insert their parameters at the
+                    # front and be before this one
+                    if 'DIFFSTATE' in params:
+                        params.insert(0, params.pop(params.index('DIFFSTATE')))
+                        # save diffstate so will skip even channels if ON
+                        diffstate = self._onORoff_1OR0_yesORno(chanSetup['BSWV']['DIFFSTATE'])
+
+                    # If cmd is BSWV, must write FRQ frequency or PERI
+                    # period second or else the other parameters like
+                    # DLY may be invalid
+                    #
+                    # NOTE: inserting at the front so that following
+                    # commands can insert their parameters at the
+                    # front and be before this one                    
+                    if 'PERI' in params:
+                        params.insert(0, params.pop(params.index('PERI')))
+                    if 'FRQ' in params:
+                        params.insert(0, params.pop(params.index('FRQ')))
+                        
                     # If cmd is BSWV, must write WVTP wave type first
                     # so that AWG will allow the parameters specific
                     # to that type.
@@ -836,16 +887,51 @@ class AWG(SCPI):
                         raise RuntimeError('No WVTP parameter saved for BSWV command - inconceivable!')
                     # Put 'WVTP' at the front of the list
                     params.insert(0,'WVTP') 
+                        
+                    # It has been found that if there is both a FRQ and
+                    # PERI parameters that there is a rounding error with
+                    # the PERI value and the set frequency is off. So in
+                    # this case, remove the PERI parameter.
+                    if ('FRQ' in params) and ('PERI' in params):
+                        params.remove('PERI')
 
-                # Write all cmd parameters. 
+                    # There are a lot of amplitude parameters that
+                    # could cause rounding errors although have not
+                    # seen it be a problem. Just in case, remove the
+                    # extras and leave only AMP and OFST which are
+                    # guessed to be fundamental. If find this to be a
+                    # problem, then remove this clause or determine
+                    # how to fix it.
+                    if 'AMP' in params:
+                        if 'AMPDBM' in params:
+                            params.remove('AMPDBM')
+                        if 'AMPVRMS' in params:
+                            params.remove('AMPVRMS')
+
+                        # If 'AMP' and 'OFST', do not need HLEV and LLEV
+                        if ('OFST' in params) and ('HLEV' in params):
+                            params.remove('HLEV')
+                        if ('OFST' in params) and ('LLEV' in params):
+                            params.remove('LLEV')
+                            
+                        
+                # Write all cmd parameters.
                 for param in params:
                     str = '{}:{} {},{}'.format(self.channelStr(chan),cmd,param,chanSetup[cmd][param])
-                    #@@@#print(str)
+                    #@@@#print(str) 
                     self._instWrite(str)
                     sleep(wait)
 
         # restore the default channel
         self.channel = defChan
+
+        # Since CH2 is setup last, if that is not the defChan, then
+        # perform a virtual key press of the channel button to make
+        # CH1 be on the screen
+        #
+        # OK - tried this but the virtual key presses take too long
+        #if (self.channel == 1):
+        #    self._instWrite('VKEY VALUE,KB_CHANNEL,STATE,1')
         
         # Return number of bytes saved to file
         return sz

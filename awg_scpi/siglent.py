@@ -559,7 +559,9 @@ class Siglent(AWG):
                         cmdParts = cmdWords[0].strip().lower().split(':')
                         if ((len(cmdParts) == 1 and
                              (cmdParts[0] == 'fcnt'
-                              or cmdParts[0] == 'freqcounter')) or
+                              or cmdParts[0] == 'freqcounter'
+                              or cmdParts[0] == 'vkey'
+                              or cmdParts[0] == 'virtualkey')) or
                             (len(cmdParts) == 2 and
                              (cmdParts[1] == 'bswv'
                               or cmdParts[1] == 'basic_wave'
