@@ -69,7 +69,8 @@ class SCPI(object):
                  read_strip = '',
                  read_termination = '',
                  write_termination = '\n',
-                 timeout = 5000):
+                 timeout = 5000,
+                 encoding = 'ascii'):
         """Init the class with the instruments resource string
 
         resource   - resource string or VISA descriptor, like TCPIP0::172.16.2.13::INSTR
@@ -80,6 +81,8 @@ class SCPI(object):
         read_strip        - optional read_strip parameter used to strip any returned termination characters
         read_termination  - optional read_termination parameter to pass to open_resource()
         write_termination - optional write_termination parameter to pass to open_resource()
+        encoding          - optional encoding to use when writing and reading data
+                            (see https://docs.python.org/3/library/codecs.html#standard-encodings)
         """
         self._resource = resource
         self._max_chan = max_chan                # number of channels
@@ -90,6 +93,7 @@ class SCPI(object):
         self._read_termination = read_termination
         self._write_termination = write_termination
         self._timeout = timeout
+        self._encoding = encoding
         self._IDNmanu = ''      # store manufacturer from IDN here
         self._IDNmodel = ''     # store instrument model number from IDN here
         self._IDNserial = ''    # store instrument serial number from IDN here
@@ -109,7 +113,8 @@ class SCPI(object):
         self._rm = visa.ResourceManager('@py')
         self._inst = self._rm.open_resource(self._resource,
                                             read_termination=self._read_termination,
-                                            write_termination=self._write_termination)
+                                            write_termination=self._write_termination,
+                                            encoding=self._encoding)
         self._inst.timeout = self._timeout
 
         # Keysight recommends using clear()
@@ -651,6 +656,23 @@ class SCPI(object):
         #@@@#print(str)
         self._instWrite(str, checkErrors)
         sleep(wait)             # give some time for PS to respond
+
+    def _setGenericParameters(self, values, cmd, channel=None, wait=None, checkErrors=None):
+        """Generic function to handle setting of parameters
+        
+           values  - a dictionary where keys of the parameter names and
+                     their values are the values to set. Best to use a
+                     Python OrderedDict() so can control the order of the keys
+           cmd     - command string to use for setting the parameter
+           wait    - number of seconds to wait after sending command
+           channel - number of the channel starting at 1
+        """
+
+        # Convert the dictionary to a comma seperated string of key,value pairs
+        value = ','.join(["{},{}".format(key,values[key]) for key in values])
+
+        # Now can call the single value function
+        self._setGenericParameter(value, cmd, channel, wait, checkErrors)
 
     def _queryGenericParameter(self, cmd, channel=None, checkErrors=None):
         """Generic function to handle query of parameters

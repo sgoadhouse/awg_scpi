@@ -110,7 +110,8 @@ class Siglent(AWG):
                                       cmd_prefix='',
                                       read_strip='\n',
                                       read_termination='',
-                                      write_termination='\n'
+                                      write_termination='\n',
+                                      encoding='ISO-8859-1' # allow 0xff to be sent in arbitrary waveform data
         )
 
         # Return list of valid analog channel strings. These are numbers.

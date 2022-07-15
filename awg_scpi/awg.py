@@ -47,7 +47,7 @@ except Exception:
     from scpi import SCPI
 
 import json
-
+from collections import OrderedDict
 from quantiphy import Quantity
 
 class AWG(SCPI):
@@ -58,7 +58,8 @@ class AWG(SCPI):
                  cmd_prefix = '',
                  read_strip = '\n',
                  read_termination = '',
-                 write_termination = '\n'):
+                 write_termination = '\n',
+                 encoding = 'ascii'):
         """Init the class with the instruments resource string
 
         resource   - resource string or VISA descriptor, like TCPIP0::172.16.2.13::INSTR
@@ -69,6 +70,8 @@ class AWG(SCPI):
         read_strip        - optional read_strip parameter used to strip any returned termination characters
         read_termination  - optional read_termination parameter to pass to open_resource()
         write_termination - optional write_termination parameter to pass to open_resource()
+        encoding          - optional encoding to use when writing and reading data
+                            (see https://docs.python.org/3/library/codecs.html#standard-encodings)
         """
 
         # "Overload" _SCPICmdTbl[] in parent with these commands.
@@ -126,6 +129,9 @@ class AWG(SCPI):
             'setFreqCntrHfrOn':              'FCNT HFR,ON',
             'setFreqCntrHfrOff':             'FCNT HFR,OFF',
             'measureFreqCntr':               'FCNT?',
+
+            # Handle Arbitrary Waveforms
+            'setArbWaveData':                '{}:WVDT {}',
             
         }
         
@@ -139,7 +145,8 @@ class AWG(SCPI):
                                   cmd_prefix=cmd_prefix,
                                   read_strip=read_strip,
                                   read_termination=read_termination,
-                                  write_termination=write_termination
+                                  write_termination=write_termination,
+                                  encoding=encoding
         )
 
         # Return list of valid analog channel strings.
@@ -740,6 +747,59 @@ class AWG(SCPI):
         fcnt = self._queryFreqCntr(channel)
 
         return self._onORoff_1OR0_yesORno(fcnt['HFR'])
+
+    ###############################################################################
+    # Arbitrary Waveform Functions
+    ###############################################################################
+
+    def setArbWaveData(self, name, freq, amp, offset, data, phase=0, channel=None, wait=None, checkErrors=None):
+        """Load a User Defined wave data to select for a channel
+
+           name           - Name to use to store and reference this arbitrary waveform
+           freq           - Frequency for this waveform (how fast the sequence restarts)
+                            The step period for each data point is 1/(freq*(# of data pts))
+           amp            - Amplitude (Vpp) for this waveform
+           offset         - Offset voltage for this waveform
+           phase          - Phase in degrees for this waveform (phase with relation to some internal clock - not completely sure)
+           data           - An array of data for the waveform. The data is treated as 16-bit signed integer values.
+                            If 0, the output is at the offset voltage.
+                            If 0x7fff or 32767, the output is at the (offset + amp/2) voltage.
+                            If 0x8000 or -32768, the output is at the (offset - amp/2) voltage.
+                            All other values scale linearly from these touchpoints.
+        
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        What the output does between the data points depends on how
+        the Sample Rate is configured using the SRATE command (in
+        Siglent). If TARB, or TrueArb, and interpolation set to HOLD,
+        then the output stays the same voltage level just before
+        transitioning to the next data point. If TARB and Linear
+        interpolation, then there is a linear interpolation between
+        the points. This also happens if SRATE mode is DDS. Other TARB
+        and Interpolation settings create slightly different outputs.
+
+        """ 
+
+        # Create a byte string from integer data. Convert each entry
+        # in data[] as a 16-bit, little endian 2-byte string which all
+        # get concatenated together
+        bindata = b''.join([x.to_bytes(2,'little') for x in data])
+
+        # Create OrderedDict or parameter and values
+        params = OrderedDict()
+        params['WVNM'] = name
+        params['FREQ'] = freq
+        params['AMPL'] = amp
+        params['OFST'] = offset
+        params['PHASE'] = phase
+        params['WAVEDATA'] = bindata.decode(self._encoding)
+                       
+        self._setGenericParameters(params, self._Cmd('setArbWaveData'), channel, wait, checkErrors)
+
+    ###############################################################################    
     
     # =========================================================
     # Currently only specific to Siglent SDG series
@@ -1026,26 +1086,27 @@ if __name__ == '__main__':
 
     #@@@#sleep(5)
 
-    # return to default parameters
-    instr.reset()               
+    if (False):
+        # return to default parameters
+        instr.reset()               
 
-    instr.setWaveType('SINE')
-    instr.setFrequency(34.4590897823e3)
-    instr.setVoltageProtection(3.3)
-    instr.setOffset(1.6)
-    #@@@#instr.setAmplitudeVrms(1.0)
-    instr.setAmplitudedBm(0.8)
-    instr.setPhase(0.45)
+        instr.setWaveType('SINE')
+        instr.setFrequency(34.4590897823e3)
+        instr.setVoltageProtection(3.3)
+        instr.setOffset(1.6)
+        #@@@#instr.setAmplitudeVrms(1.0)
+        instr.setAmplitudedBm(0.8)
+        instr.setPhase(0.45)
 
-    print("Voltage Protection is set to maximum: {}".format(instr.queryVoltageProtection()))
+        print("Voltage Protection is set to maximum: {}".format(instr.queryVoltageProtection()))
 
-    # turn on the channel
-    instr.outputOn()
+        # turn on the channel
+        instr.outputOn()
 
-    sleep(2)
+        sleep(2)
     
-    # turn off the channel
-    instr.outputOff()
+        # turn off the channel
+        instr.outputOff()
 
     if (False) :
         # Test Frequency Counter functions
@@ -1148,49 +1209,64 @@ if __name__ == '__main__':
         
         # turn off the channel
         instr.outputOff()
+
+    if (False):
+        # return to default parameters
+        instr.reset()               
+        instr.setVoltageProtection(3.2)
+
+        # reset the default channel
+        instr.channel = str(args.chan)
+    
+        # Setup a different basic wave output
+        instr.setWaveType('PULSE')
+        instr.setFrequency(1e3)
+        instr.setOutputInverted(False)
+        instr.setOutputLoad(False)
+        #@@@#instr.setOffset(1.6)
+        #@@@#instr.setAmplitude(3.2)
+        instr.setHighLevel(3.1)
+        instr.setLowLevel(0.2)
+        instr.setPulseWidth(50e-9)
+        instr.setPulseRise(2e-9)
+        instr.setPulseFall(2e-9)
+        instr.setOutputInverted(True)
+
+        #@@@#print(instr._queryWaveParameters())
+    
+        # turn on the channel
+        instr.outputOn()
+
+        instr.setupSave("testSetup.json")
+    
+        sleep(5)
+
+        # Setup a different basic wave output (NOTE: output is ON)
+        instr.setWaveType('PRBS')
+        instr.setHighLevel(2.2)
+        instr.setLowLevel(0)        
+        instr.setPRBSBitLength(3)
         
-    # return to default parameters
-    instr.reset()               
-    instr.setVoltageProtection(3.2)
+        sleep(2)
 
-    # reset the default channel
-    instr.channel = str(args.chan)
+        print()
+        # Now Load setup as a test (with Output still on (should go off)
+        instr.setupLoad("testSetup.json", wait=0.0)
+
+    if (True):
+        # return to default parameters
+        instr.reset()               
+
+        data = [0, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7fff]
+        instr.setArbWaveData("my_stair", 1e6, 2, 1.0, data)
+
+        # Add the commands to select this waveform
+        # Add the commands to set the SRATE Sampling Rate modes
+        # Add the commands to save and restore these settings (maybe not get and put the waveform data)
+        # Add the commands to get waveform data and return as a list of integers
+        # Add the commands to get and put waveform data into a binary file
+
     
-    # Setup a different basic wave output
-    instr.setWaveType('PULSE')
-    instr.setFrequency(1e3)
-    instr.setOutputInverted(False)
-    instr.setOutputLoad(False)
-    #@@@#instr.setOffset(1.6)
-    #@@@#instr.setAmplitude(3.2)
-    instr.setHighLevel(3.1)
-    instr.setLowLevel(0.2)
-    instr.setPulseWidth(50e-9)
-    instr.setPulseRise(2e-9)
-    instr.setPulseFall(2e-9)
-    instr.setOutputInverted(True)
-
-    #@@@#print(instr._queryWaveParameters())
-    
-    # turn on the channel
-    instr.outputOn()
-
-    instr.setupSave("testSetup.json")
-    
-    sleep(5)
-
-    # Setup a different basic wave output (NOTE: output is ON)
-    instr.setWaveType('PRBS')
-    instr.setHighLevel(2.2)
-    instr.setLowLevel(0)        
-    instr.setPRBSBitLength(3)
-
-    sleep(2)
-
-    print()
-    # Now Load setup as a test (with Output still on (should go off)
-    instr.setupLoad("testSetup.json", wait=0.0)
-
     sleep(5)
     
     # turn off the channel
