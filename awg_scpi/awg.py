@@ -49,6 +49,7 @@ except Exception:
 import json
 from collections import OrderedDict
 from quantiphy import Quantity
+import pyvisa as visa
 
 class AWG(SCPI):
     """Base class for controlling and accessing an Arbitrary Waveform Generator with PyVISA and SCPI commands"""
@@ -132,6 +133,11 @@ class AWG(SCPI):
 
             # Handle Arbitrary Waveforms
             'setArbWaveData':                '{}:WVDT {}',
+            'setArbWaveByIndex':             '{}:ARWV INDEX,{}',
+            'setArbWaveByName':              '{}:ARWV NAME,{}',
+            'setArbModeDDS':                 '{}:SRATE MODE,DDS',
+            'setArbMode':                    '{}:SRATE {}',
+            'queryArbWaveData':              'WVDT? USER,{1}',
             
         }
         
@@ -752,6 +758,44 @@ class AWG(SCPI):
     # Arbitrary Waveform Functions
     ###############################################################################
 
+    def _setArbWaveBin(self, name, freq, amp, offset, bindata, phase=0, channel=None, wait=None, checkErrors=None):
+        """Load a User Defined wave data to select for a channel
+
+           name           - Name to use to store and reference this arbitrary waveform
+           freq           - Frequency for this waveform (how fast the sequence restarts)
+                            The step period for each data point is 1/(freq*(# of data pts))
+           amp            - Amplitude (Vpp) for this waveform
+           offset         - Offset voltage for this waveform
+           phase          - Phase in degrees for this waveform (phase with relation to some internal clock - not completely sure)
+           bindata        - Binary data as a Python byte array arranged as 16-bit, little endian words
+        
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        What the output does between the data points depends on how
+        the Sample Rate is configured using the SRATE command (in
+        Siglent). If TARB, or TrueArb, and interpolation set to HOLD,
+        then the output stays the same voltage level just before
+        transitioning to the next data point. If TARB and Linear
+        interpolation, then there is a linear interpolation between
+        the points. This also happens if SRATE mode is DDS. Other TARB
+        and Interpolation settings create slightly different outputs.
+
+        """ 
+
+        # Create OrderedDict of parameter and values
+        params = OrderedDict()
+        params['WVNM'] = name
+        params['FREQ'] = freq
+        params['AMPL'] = amp
+        params['OFST'] = offset
+        params['PHASE'] = phase
+        params['WAVEDATA'] = bindata.decode(self._encoding)
+                       
+        self._setGenericParameters(params, self._Cmd('setArbWaveData'), channel, wait, checkErrors)
+
     def setArbWaveData(self, name, freq, amp, offset, data, phase=0, channel=None, wait=None, checkErrors=None):
         """Load a User Defined wave data to select for a channel
 
@@ -788,17 +832,319 @@ class AWG(SCPI):
         # get concatenated together
         bindata = b''.join([x.to_bytes(2,'little') for x in data])
 
-        # Create OrderedDict or parameter and values
-        params = OrderedDict()
-        params['WVNM'] = name
-        params['FREQ'] = freq
-        params['AMPL'] = amp
-        params['OFST'] = offset
-        params['PHASE'] = phase
-        params['WAVEDATA'] = bindata.decode(self._encoding)
-                       
-        self._setGenericParameters(params, self._Cmd('setArbWaveData'), channel, wait, checkErrors)
+        self._setArbWaveBin(name, freq, amp, offset, bindata, phase, channel, wait, checkErrors)
 
+    def setArbWaveDataFromFile(self, filename, name, freq, amp, offset, phase=0, channel=None, wait=None, checkErrors=None):
+        """Load a User Defined wave data to select for a channel
+
+           filename       - A filename with binary data to be loaded into a User-defined arbitrary wave form
+           name           - Name to use to store and reference this arbitrary waveform
+           freq           - Frequency for this waveform (how fast the sequence restarts)
+                            The step period for each data point is 1/(freq*(# of data pts))
+           amp            - Amplitude (Vpp) for this waveform
+           offset         - Offset voltage for this waveform
+           phase          - Phase in degrees for this waveform (phase with relation to some internal clock - not completely sure)
+        
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        What the output does between the data points depends on how
+        the Sample Rate is configured using the SRATE command (in
+        Siglent). If TARB, or TrueArb, and interpolation set to HOLD,
+        then the output stays the same voltage level just before
+        transitioning to the next data point. If TARB and Linear
+        interpolation, then there is a linear interpolation between
+        the points. This also happens if SRATE mode is DDS. Other TARB
+        and Interpolation settings create slightly different outputs.
+
+        """ 
+
+        with open(filename, "rb") as binary_file:
+            bindata = binary_file.read()
+
+        self._setArbWaveBin(name, freq, amp, offset, bindata, phase, channel, wait, checkErrors)
+            
+        # return the number of bytes written
+        return len(bindata)
+        
+
+    def setArbWaveByIndex(self, waveIndex, channel=None, wait=None, checkErrors=None):
+        """Select the Arbitrary Wave for the channel
+
+           waveIndex      - A number from the published wave tables for the particular AWG - not checked for errors
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+           Select the Arbitrary Wave to use by Index. Follow this by setting the wave type to ARB
+        """ 
+
+        self._setGenericParameter(waveIndex, self._Cmd('setArbWaveByIndex'), channel, wait, checkErrors)
+        self._setGenericParameter('ARB', self._Cmd('setWaveType'), channel, wait, checkErrors)
+
+    def setArbWaveByName(self, waveName, channel=None, wait=None, checkErrors=None):
+        """Select the Arbitrary Wave for the channel
+
+           waveName       - A name from the published wave tables for the particular AWG - can also be the name of a user entered wave
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+           Select the Arbitrary Wave to use by Index. Follow this by setting the wave type to ARB
+        """ 
+
+        self._setGenericParameter(waveName, self._Cmd('setArbWaveByName'), channel, wait, checkErrors)
+        self._setGenericParameter('ARB', self._Cmd('setWaveType'), channel, wait, checkErrors)
+
+    def setArbModeDDS(self, channel=None, wait=None, checkErrors=None):
+        """Set the Arbitrary Wave mode to DDS for the channel.
+           This is a linear interpolation between samples and repeats the samples per frequency setting.
+           This does not take sample rate or interpolation.
+           Not completely sure of difference between this and TrueARB / Linear
+           other than TrueARB / Linear allows for a Sample Rate.
+
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        self._setGenericParameter(0, self._Cmd('setArbModeDDS'), channel, wait, checkErrors)
+
+    def setArbModeLinear(self, sampleRate, channel=None, wait=None, checkErrors=None):
+        """Set the Arbitrary Wave mode to TrueArb (TARB) and interpolation to linear for the channel.
+           This is a linear interpolation between samples and outputs a new sample per sampleRate
+
+           sampleRate     - Output is updated with a new sample per this rate in units Sa/S (samples per second)
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+        """ 
+
+        # Create OrderedDict of parameter and values
+        params = OrderedDict()
+        params['MODE'] = 'TARB'
+        params['INTER'] = 'LINE'
+        params['VALUE'] = sampleRate
+                       
+        self._setGenericParameters(params, self._Cmd('setArbMode'), channel, wait, checkErrors)
+
+    def setArbModeHold(self, sampleRate, channel=None, wait=None, checkErrors=None):
+        """Set the Arbitrary Wave mode to TrueArb (TARB) and interpolation to zero-order hold for the channel.
+        
+           Zero-order hold means to stay at the sample value until the
+           next sample. There is a voltage ramping between samples
+           which does not appear to have a way to be set.
+
+           sampleRate     - Output is updated with a new sample per this rate in units Sa/S (samples per second)
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        # Create OrderedDict of parameter and values
+        params = OrderedDict()
+        params['MODE'] = 'TARB'
+        params['INTER'] = 'HOLD'
+        params['VALUE'] = sampleRate
+                       
+        self._setGenericParameters(params, self._Cmd('setArbMode'), channel, wait, checkErrors)
+
+    def setArbModeSinc(self, sampleRate, channel=None, wait=None, checkErrors=None):
+        """Set the Arbitrary Wave mode to TrueArb (TARB) and interpolation to sinc for the channel.
+        
+           Uses a Sinc function to interpolate between samples.
+        
+           sampleRate     - Output is updated with a new sample per this rate in units Sa/S (samples per second)
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        # Create OrderedDict of parameter and values
+        params = OrderedDict()
+        params['MODE'] = 'TARB'
+        params['INTER'] = 'SINC'
+        params['VALUE'] = sampleRate
+                       
+        self._setGenericParameters(params, self._Cmd('setArbMode'), channel, wait, checkErrors)
+
+    def setArbModeSinc13(self, sampleRate, channel=None, wait=None, checkErrors=None):
+        """Set the Arbitrary Wave mode to TrueArb (TARB) and interpolation to sinc13 for the channel.
+        
+           Uses a Sinc13 function to interpolate between samples.
+        
+           sampleRate     - Output is updated with a new sample per this rate in units Sa/S (samples per second)
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        # Create OrderedDict of parameter and values
+        params = OrderedDict()
+        params['MODE'] = 'TARB'
+        params['INTER'] = 'SINC13'
+        params['VALUE'] = sampleRate
+                       
+        self._setGenericParameters(params, self._Cmd('setArbMode'), channel, wait, checkErrors)
+
+    def setArbModeSinc27(self, sampleRate, channel=None, wait=None, checkErrors=None):
+        """Set the Arbitrary Wave mode to TrueArb (TARB) and interpolation to sinc27 for the channel.
+        
+           Uses a Sinc27 function to interpolate between samples.
+        
+           sampleRate     - Output is updated with a new sample per this rate in units Sa/S (samples per second)
+           channel        - number of the channel starting at 1
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        # Create OrderedDict of parameter and values
+        params = OrderedDict()
+        params['MODE'] = 'TARB'
+        params['INTER'] = 'SINC27'
+        params['VALUE'] = sampleRate
+                       
+        self._setGenericParameters(params, self._Cmd('setArbMode'), channel, wait, checkErrors)
+
+    def queryArbWaveNamesUser(self, channel=None, wait=None, checkErrors=None):
+        """Query and return the list of wave data name for user defined waves
+
+           channel        - number of the channel starting at 1 (ignored but included since in other calls)
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+
+        cmd = 'STL'
+        ret = self._instQuery('{}?{}'.format(cmd, ' USER'))
+        words = ret.split(' ')  # split by words with spaces
+
+        if(len(words) != 2 or words[0].strip() != cmd):
+            raise RuntimeError('Unexpected return string for {}? command: "' + ret + '"'.format(cmd))
+
+        params = words[1].split(',')
+
+        if(params[0] != 'WVNM'):
+            raise RuntimeError('Unexpected return string for {}? command: "' + ret + '"'.format(cmd))
+        
+        return params[1:]
+
+    def _queryArbWaveBin(self, name, channel=None, wait=None, checkErrors=None):
+        """Query a User Defined wave data and return data as a byte string 
+
+           name           - Name to use to store and reference this arbitrary waveform (case sensitive)
+        
+           channel        - number of the channel starting at 1 (ignored but included since in other calls)
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+        
+        str = self._Cmd('queryArbWaveData').format(self.channelStr(self.channel), name)
+
+        try:
+            ret = self._instQuery(str)
+        except visa.VisaIOError as err:
+            if (err.error_code == visa.constants.StatusCode.error_timeout):
+                raise RuntimeError('VISA Timeout while querying wave data. Most likely, "{}" is not a valid wave name.\nUse queryArbWaveNamesUser() to find the valid user names.'.format(name))
+            else:
+                raise RuntimeError("Exited because of VISA IO Error: {}".format(err))
+
+
+        p1 = 'WVNM, '
+        filename = ret.find(p1) + len(p1)
+        # Determine where the binary data begins in the return string
+        data_pos = ret.find("WAVEDATA,") + len("WAVEDATA,")
+        # Split the returned parameters up until the data using ' '
+        # Unlike every other command, there are spaces after each ',' so need to deal with that.
+        retParams = ret[0:data_pos]
+        retList = retParams.split(' ')
+        # remove trailing ','
+        retList = [x.rstrip(',') for x in retList]
+        if(retList[0] != 'WVDT' or retList[3] != 'WVNM' or retList[4] != name or retList[5] != 'LENGTH'):
+            raise RuntimeError('Unexpected return string for WVDT? command: "' + retParams + '"')
+
+        # get the byte length
+        byteLen = int(retList[6].rstrip('B'))
+        
+        # get the byte data
+        byteData = ret[data_pos:].encode(self._encoding)
+
+        # Check byte length
+        if(len(byteData) != byteLen):
+            raise RuntimeError('Unexpected number of wave data bytes for WVDT? command. Exp. {}  Act. {}'.format(byteLen, len(byteData)))
+
+        return byteData
+
+    def queryArbWaveData(self, name, channel=None, wait=None, checkErrors=None):
+        """Query a User Defined wave data 
+
+           name           - Name to use to store and reference this arbitrary waveform (case sensitive)
+        
+           channel        - number of the channel starting at 1 (ignored but included since in other calls)
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+           Reads the wave data for wave named with 'name'. Returns as a list of 16-bit integers.
+        
+        """ 
+
+        byteData = self._queryArbWaveBin(name, channel, wait, checkErrors)
+
+        it = iter(byteData)
+        wordData = [(y<<8)+x for x,y in zip(it,it)]
+
+        return wordData
+        
+    def queryArbWaveDataToFile(self, filename, name, channel=None, wait=None, checkErrors=None):
+        """Query a User Defined wave data and saves to a binary file.
+
+           filename       - Name of the binary file to store the binary wave data
+           name           - Name to use to store and reference this arbitrary waveform (case sensitive)
+        
+           channel        - number of the channel starting at 1 (ignored but included since in other calls)
+           wait           - number of seconds to wait after sending command
+           checkErrors    - If True, Check for SCPI Errors, else don't bother
+                            if None, use self._defaultCheckErrors
+
+        """ 
+
+        byteData = self._queryArbWaveBin(name, channel, wait, checkErrors)
+
+        with open(filename, "wb") as binary_file:
+            binary_file.write(byteData)
+
+        # return the number of bytes written
+        return len(byteData)
+        
     ###############################################################################    
     
     # =========================================================
@@ -825,7 +1171,13 @@ class AWG(SCPI):
             cmds['BSWV'] = self._queryWaveParameters(chan)
 
             if cmds['BSWV']['WVTP'] == 'ARB':
-                raise ValueError('The AWG module does not support saving the setup for waveform type "ARB"')
+                # For Arbitrary Waves, also need which wave is selected and its sample rate/mode
+                #
+                # Get ARWV? query as a dictionary
+                cmds['ARWV'] = self._queryArbWaveType(chan)
+                # Get SRATE? query as a dictionary
+                cmds['SRATE'] = self._queryArbWaveMode(chan)
+                
 
             setup.append(cmds)
 
@@ -910,8 +1262,19 @@ class AWG(SCPI):
 
                 # make sure all upper case for comparisons
                 params = [x.upper() for x in params]
-                
-                if cmd == 'BSWV':
+
+                if cmd == 'ARWV' or cmd == 'ARBWAVE':
+                    # If cmd is ARWV or its long form, need to check
+                    # for a NAME parameter. If it is user defined file
+                    # name, must strip off the .bin extension because
+                    # although we are given the parameter with the
+                    # extension, the ARB gets unhappy when we try to
+                    # give it back with extension.
+                    if 'NAME' in params:
+                        chanSetup['ARWV']['NAME'] = chanSetup['ARWV']['NAME'].rstrip('.bin')
+                        chanSetup['ARWV']['NAME'] = chanSetup['ARWV']['NAME'].rstrip('.BIN') # in case ext is uppercase
+                        
+                if cmd == 'BSWV' or cmd == 'BASIC_WAVE':
                     # If cmd is BSWV, must write DIFFSTATE, if it
                     # exists, third so that any output voltage
                     # parameters get put on both channels.
@@ -978,7 +1341,7 @@ class AWG(SCPI):
                 # Write all cmd parameters.
                 for param in params:
                     str = '{}:{} {},{}'.format(self.channelStr(chan),cmd,param,chanSetup[cmd][param])
-                    #@@@#print(str) 
+                    print(str) #@@@#
                     self._instWrite(str)
                     sleep(wait)
 
@@ -1086,7 +1449,7 @@ if __name__ == '__main__':
 
     #@@@#sleep(5)
 
-    if (False):
+    if (True):
         # return to default parameters
         instr.reset()               
 
@@ -1253,20 +1616,92 @@ if __name__ == '__main__':
         # Now Load setup as a test (with Output still on (should go off)
         instr.setupLoad("testSetup.json", wait=0.0)
 
+    if (False):
+        # return to default parameters
+        instr.reset()               
+
+        # load data as user arb wav enamed "my_stair"
+        data = [0, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7fff]
+        instr.setArbWaveData("my_stair", 1e6, 2, 1.0, data)
+        # select this new user waveform
+        instr.setArbWaveByName("my_stair")
+        # Set Mode to zero-order hold and 1MSa/s so each sample last 1 us
+        instr.setArbModeHold(1e6)
+
+        instr.setupSave("testSetup_arb.json")
+        
+        # turn on the channel
+        instr.outputOn()
+        
+        sleep(5)
+
+        # Try Linear interpolation
+        instr.setArbModeLinear(1.1e6)
+
+        sleep(5)
+
+        # Try Sinc interpolation
+        instr.setArbModeSinc(1.2e6)
+
+        sleep(5)
+        
+        # Try Sinc13 interpolation
+        instr.setArbModeSinc13(1.3e6)
+
+        sleep(5)
+        
+        # Try Sinc27 interpolation
+        instr.setArbModeSinc27(1.4e6)
+
+        sleep(5)
+        
+        # Try DDS Mode
+        instr.setArbModeDDS()
+
+        sleep(5)
+
+        # turn off the channel
+        instr.outputOff()
+        
+        # Setup a different basic wave output (NOTE: output is ON)
+        instr.setWaveType('RAMP')
+        instr.setFrequency(2e6)
+        instr.setHighLevel(3.3)
+        instr.setLowLevel(0.2)        
+        instr.outputOn()
+        
+        sleep(3)
+
+        # Now Load setup as a test (with Output still on (should go off)
+        instr.setupLoad("testSetup_arb.json", wait=0.0)
+        instr.outputOn()
+
+        sleep(5)
+        
+        # turn off the channel
+        instr.outputOff()
+        
+
     if (True):
         # return to default parameters
         instr.reset()               
 
-        data = [0, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7fff]
-        instr.setArbWaveData("my_stair", 1e6, 2, 1.0, data)
+        print(instr.queryArbWaveNamesUser())
+        
+        waveData = instr.queryArbWaveData("my_stair")
+        print([hex(x) for x in waveData])
 
-        # Add the commands to select this waveform
-        # Add the commands to set the SRATE Sampling Rate modes
-        # Add the commands to save and restore these settings (maybe not get and put the waveform data)
-        # Add the commands to get waveform data and return as a list of integers
-        # Add the commands to get and put waveform data into a binary file
+        name = "my_stair"
+        fn = "my_stair.bin"
+        writeLen = instr.queryArbWaveDataToFile(fn,name)
+        print("Wrote {} bytes of wave data by the name '{}' to '{}'".format(writeLen,name,fn))
 
-    
+        name = "my_stair2"
+        fn = "my_stair.bin"
+        readLen = instr.setArbWaveDataFromFile(fn,name,1e6,2.0,1.0)
+        print("Read {} bytes of wave data from '{}' and sent as wave name '{}'".format(readLen,fn,name))
+        
+        
     sleep(5)
     
     # turn off the channel

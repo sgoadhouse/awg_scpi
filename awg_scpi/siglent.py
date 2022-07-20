@@ -332,6 +332,45 @@ class Siglent(AWG):
         sleep(wait)             # give some time for PS to respond
 
     # ===========================================================================
+    # Query Arbitrary Wave Type and create a dictionary from the response
+    # ===========================================================================        
+    def _queryGenericParameters(self, cmd, channel=None):
+        """Perform a generic query of a command which is expected to
+           return the cmd name followed by a list of parameters. Return
+           those parameters in a dictionary.
+
+           cmd            - command string to use for setting the parameter
+           channel        - number of the channel starting at 1
+
+        """
+
+        # If a channel number is passed in, make it the
+        # current channel
+        if channel is not None:
+            self.channel = channel
+        
+        str = '{}:{}'.format(self.channelStr(self.channel), cmd)
+        ret = self._instQuery(str+'?')
+        words = ret.split(' ')  # split by words with spaces
+
+        if(len(words) != 2 or words[0].strip() != str):
+            raise RuntimeError('Unexpected return string for {}? command: "' + ret + '"'.format(cmd))
+
+        # Convert the comma seperated list of parameters as a Python dictionary.
+        # do NOT uppercase parameter values because with wave file names, case is significant.
+        #@@@#param = words[1].strip().upper().split(',')
+        param = words[1].strip().split(',')
+        if(len(param)%2 != 0):
+            raise RuntimeError('Expected an even number of returned comma seperated words from {}? command:\n   "' + ret + '"'.format(cmd))
+
+        it = iter(param)
+        ret_dict = dict(zip(it, it))
+
+        #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param, " ret_dict: ", ret_dict)
+        
+        return ret_dict
+
+    # ===========================================================================
     # Query Basic Wave parameters and create a dictionary from the response
     # ===========================================================================        
     def _queryWaveParameters(self, channel=None):
@@ -342,29 +381,7 @@ class Siglent(AWG):
            channel        - number of the channel starting at 1
         """
 
-        # If a channel number is passed in, make it the
-        # current channel
-        if channel is not None:
-            self.channel = channel
-        
-        str = '{}:BSWV'.format(self.channelStr(self.channel))
-        ret = self._instQuery(str+'?')
-        words = ret.split(' ')  # split by words with spaces
-
-        if(len(words) != 2 or words[0].strip() != str):
-            raise RuntimeError('Unexpected return string for BSWV? command: "' + ret + '"')
-
-        # convert the comma seperated list of parameters as a Python dictionary and make sure all letters are uppercase
-        param = words[1].strip().upper().split(',')
-        if(len(param)%2 != 0):
-            raise RuntimeError('Expected an even number of returned comma seperated words from BSWV? command:\n   "' + ret + '"')
-
-        it = iter(param)
-        ret_dict = dict(zip(it, it))
-
-        #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param, " ret_dict: ", ret_dict)
-        
-        return ret_dict
+        return self._queryGenericParameters('BSWV', channel)
 
     # ===========================================================================
     # Query Frequency Counter and return a dictionary from the response
@@ -389,8 +406,10 @@ class Siglent(AWG):
         if(len(words) != 2 or words[0].strip() != str):
             raise RuntimeError('Unexpected return string for FCNT? command: "' + ret + '"')
 
-        # convert the comma seperated list of parameters as a Python dictionary and make sure all letters are uppercase
-        param = words[1].strip().upper().split(',')
+        # Convert the comma seperated list of parameters as a Python dictionary.
+        # do NOT uppercase parameter values because with wave file names, case is significant.
+        #@@@#param = words[1].strip().upper().split(',')
+        param = words[1].strip().split(',')
         if(len(param)%2 != 0):
             raise RuntimeError('Expected an even number of returned comma seperated words from FCNT? command:\n   "' + ret + '"')
 
@@ -400,6 +419,45 @@ class Siglent(AWG):
         #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param, " ret_dict: ", ret_dict)
         
         return ret_dict
+
+    # ===========================================================================
+    # Query Arbitrary Wave Type and create a dictionary from the response
+    # ===========================================================================        
+    def _queryArbWaveType(self, channel=None):
+        """Perform an arbitrary wave type query on the channel and return a dictionary of the returned parameters
+
+           expected returned parameters: INDEX,2,NAME,StairUp
+
+           channel        - number of the channel starting at 1
+        """
+
+        return self._queryGenericParameters('ARWV', channel)
+
+    # ===========================================================================
+    # Query Arbitrary Wave Type and create a dictionary from the response
+    # ===========================================================================        
+    def _queryArbWaveType(self, channel=None):
+        """Perform an arbitrary wave type query on the channel and return a dictionary of the returned parameters
+
+           expected returned parameters: INDEX,2,NAME,StairUp
+
+           channel        - number of the channel starting at 1
+        """
+
+        return self._queryGenericParameters('ARWV', channel)
+
+    # ===========================================================================
+    # Query Arbitrary Wave Mode / Sample Rate and create a dictionary from the response
+    # ===========================================================================        
+    def _queryArbWaveMode(self, channel=None):
+        """Perform an arbitrary wave mode query on the channel and return a dictionary of the returned parameters
+
+           expected returned parameters: MODE,TARB,INTER,HOLD,VALUE,1000000
+
+           channel        - number of the channel starting at 1
+        """
+
+        return self._queryGenericParameters('SRATE', channel)
 
     def queryOffset(self, channel=None, checkErrors=None):
         """Query the voltage offset for the channel
@@ -551,7 +609,7 @@ class Siglent(AWG):
                     # Not "No error".
                     #
                     # However, for some unknown reason, the BSWV
-                    # command, FCNT and OUTP commands ALWAYS returns -108
+                    # command, FCNT, OUTP, ARWV, SRATE & WVDT? commands ALWAYS returns -108
                     # error code so if see that, ignore
                     #
                     # FCNT has no channel name before it but the others do
@@ -562,12 +620,21 @@ class Siglent(AWG):
                              (cmdParts[0] == 'fcnt'
                               or cmdParts[0] == 'freqcounter'
                               or cmdParts[0] == 'vkey'
-                              or cmdParts[0] == 'virtualkey')) or
+                              or cmdParts[0] == 'virtualkey'
+                              or cmdParts[0] == 'wvdt?')) or
                             (len(cmdParts) == 2 and
                              (cmdParts[1] == 'bswv'
                               or cmdParts[1] == 'basic_wave'
                               or cmdParts[1] == 'outp'
-                              or cmdParts[1] == 'output'))):
+                              or cmdParts[1] == 'output'
+                              or cmdParts[1] == 'arwv'
+                              or cmdParts[1] == 'arbwave'
+                              or cmdParts[1] == 'srate'
+                              or cmdParts[1] == 'samplerate'
+                              or cmdParts[1] == 'wvdt')) or
+                            (len(cmdParts) > 2 and
+                             # Fo rsome reason, SPACES exist between return parameters - very ODD
+                             (cmdParts[1] == 'wvdt'))):
                             break
                         
                     print("ERROR({:02d}): {}, command: '{}'".format(reads, error_string, commandStr))
