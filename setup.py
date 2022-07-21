@@ -7,7 +7,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(name="awg_scpi", 
-                 version='0.1.1',
+                 version='0.2.2',
                  description='Control of Arbitrary Waveform Generators (AWG) with SCPI command sets like Siglent SDG6022X through python via PyVisa',
                  long_description=long_description,
                  long_description_content_type="text/markdown",

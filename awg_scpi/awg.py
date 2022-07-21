@@ -39,6 +39,7 @@ from __future__ import print_function
 from time import sleep
 import sys
 import os
+import struct
 
 try:
     from .scpi import SCPI
@@ -60,7 +61,9 @@ class AWG(SCPI):
                  read_strip = '\n',
                  read_termination = '',
                  write_termination = '\n',
-                 encoding = 'ascii'):
+                 encoding = 'ascii',
+                 timeout = 5000,
+                 chunk_size = 20480):
         """Init the class with the instruments resource string
 
         resource   - resource string or VISA descriptor, like TCPIP0::172.16.2.13::INSTR
@@ -152,7 +155,9 @@ class AWG(SCPI):
                                   read_strip=read_strip,
                                   read_termination=read_termination,
                                   write_termination=write_termination,
-                                  encoding=encoding
+                                  encoding=encoding,
+                                  timeout=timeout,
+                                  chunk_size=chunk_size
         )
 
         # Return list of valid analog channel strings.
@@ -176,6 +181,11 @@ class AWG(SCPI):
 
         # Set the list of valid logic level strings - these can be overriden by child objects as needed
         self._validLogicLevels = ["TTL", "CMOS"]
+
+    ## Overload this method so can, if desired, output to the console every VISA WRITE message
+    def _visa_write_raw(self, message):
+        #@@@#print('VISA Write "{}"'.format(message))
+        return self._saved_visa_write_raw(message)
         
     @property
     def chanAnaValidList(self):
@@ -758,8 +768,11 @@ class AWG(SCPI):
     # Arbitrary Waveform Functions
     ###############################################################################
 
-    def _setArbWaveBin(self, name, freq, amp, offset, bindata, phase=0, channel=None, wait=None, checkErrors=None):
+    def _setArbWaveBin(self, data, name, freq, amp, offset, phase=0, channel=None, wait=None, checkErrors=None):
         """Load a User Defined wave data to select for a channel
+
+           data           - If a list of integers, will be treated as 16-bit signed values.
+                            If a byte string, treated as binary data arranged as 16-bit, little endian words
 
            name           - Name to use to store and reference this arbitrary waveform
            freq           - Frequency for this waveform (how fast the sequence restarts)
@@ -767,7 +780,6 @@ class AWG(SCPI):
            amp            - Amplitude (Vpp) for this waveform
            offset         - Offset voltage for this waveform
            phase          - Phase in degrees for this waveform (phase with relation to some internal clock - not completely sure)
-           bindata        - Binary data as a Python byte array arranged as 16-bit, little endian words
         
            channel        - number of the channel starting at 1
            wait           - number of seconds to wait after sending command
@@ -785,32 +797,43 @@ class AWG(SCPI):
 
         """ 
 
-        # Create OrderedDict of parameter and values
-        params = OrderedDict()
-        params['WVNM'] = name
-        params['FREQ'] = freq
-        params['AMPL'] = amp
-        params['OFST'] = offset
-        params['PHASE'] = phase
-        params['WAVEDATA'] = bindata.decode(self._encoding)
-                       
-        self._setGenericParameters(params, self._Cmd('setArbWaveData'), channel, wait, checkErrors)
+        if isinstance(data,bytes):
+            #@@@#print("Bytes")
+            datatype='s'
+        elif isinstance(data,list) and isinstance(data[0],int):
+            #@@@#print("Integers")
+            datatype='H'
+        else:
+            raise RuntimeError("_setArbWaveBin(): data is not a list of integers or list of bytes")
 
-    def setArbWaveData(self, name, freq, amp, offset, data, phase=0, channel=None, wait=None, checkErrors=None):
+        length=len(data)*struct.calcsize(datatype)
+        #@@@#print("_ArbWaveBin byte data length: {}".format(length))
+        
+        params = 'WVNM,{},LENGTH,{},FREQ,{},AMPL,{},OFST,{},PHASE,{},WAVEDATA,'.format(name,length,freq,amp,offset,phase)
+        str = self._Cmd('setArbWaveData').format(self.channelStr(self.channel), params)
+
+        #@@@#print("Writing {} bytes of waveform data".format(length))
+        
+        bytesWritten = self._instWriteBinBlock(str, data, datatype=datatype, wait=1.0, checkErrors=checkErrors)
+
+        return bytesWritten
+
+    def setArbWaveData(self, data, name, freq, amp, offset, phase=0, channel=None, wait=None, checkErrors=None):
         """Load a User Defined wave data to select for a channel
 
-           name           - Name to use to store and reference this arbitrary waveform
-           freq           - Frequency for this waveform (how fast the sequence restarts)
-                            The step period for each data point is 1/(freq*(# of data pts))
-           amp            - Amplitude (Vpp) for this waveform
-           offset         - Offset voltage for this waveform
-           phase          - Phase in degrees for this waveform (phase with relation to some internal clock - not completely sure)
            data           - An array of data for the waveform. The data is treated as 16-bit signed integer values.
                             If 0, the output is at the offset voltage.
                             If 0x7fff or 32767, the output is at the (offset + amp/2) voltage.
                             If 0x8000 or -32768, the output is at the (offset - amp/2) voltage.
                             All other values scale linearly from these touchpoints.
         
+           name           - Name to use to store and reference this arbitrary waveform
+           freq           - Frequency for this waveform (how fast the sequence restarts)
+                            The step period for each data point is 1/(freq*(# of data pts))
+           amp            - Amplitude (Vpp) for this waveform
+           offset         - Offset voltage for this waveform
+           phase          - Phase in degrees for this waveform (phase with relation to some internal clock - not completely sure)
+
            channel        - number of the channel starting at 1
            wait           - number of seconds to wait after sending command
            checkErrors    - If True, Check for SCPI Errors, else don't bother
@@ -830,9 +853,11 @@ class AWG(SCPI):
         # Create a byte string from integer data. Convert each entry
         # in data[] as a 16-bit, little endian 2-byte string which all
         # get concatenated together
-        bindata = b''.join([x.to_bytes(2,'little') for x in data])
+        #
+        # NOTE: no longer have to do this conversion
+        #@@@#bindata = b''.join([x.to_bytes(2,'little') for x in data])
 
-        self._setArbWaveBin(name, freq, amp, offset, bindata, phase, channel, wait, checkErrors)
+        return self._setArbWaveBin(data, name, freq, amp, offset, phase, channel, wait, checkErrors)
 
     def setArbWaveDataFromFile(self, filename, name, freq, amp, offset, phase=0, channel=None, wait=None, checkErrors=None):
         """Load a User Defined wave data to select for a channel
@@ -864,10 +889,8 @@ class AWG(SCPI):
         with open(filename, "rb") as binary_file:
             bindata = binary_file.read()
 
-        self._setArbWaveBin(name, freq, amp, offset, bindata, phase, channel, wait, checkErrors)
-            
         # return the number of bytes written
-        return len(bindata)
+        return self._setArbWaveBin(bindata, name, freq, amp, offset, phase, channel, wait, checkErrors)
         
 
     def setArbWaveByIndex(self, waveIndex, channel=None, wait=None, checkErrors=None):
@@ -1341,7 +1364,7 @@ class AWG(SCPI):
                 # Write all cmd parameters.
                 for param in params:
                     str = '{}:{} {},{}'.format(self.channelStr(chan),cmd,param,chanSetup[cmd][param])
-                    print(str) #@@@#
+                    #@@@#print(str) 
                     self._instWrite(str)
                     sleep(wait)
 
@@ -1392,7 +1415,8 @@ if __name__ == '__main__':
     ## fully defined by the child classes. Currently that is just
     ## Siglent AWGs.
 
-    from time import sleep    
+    from time import sleep
+    import filecmp
     import argparse
     parser = argparse.ArgumentParser(description='Access and control an AWG')
     parser.add_argument('chan', nargs='?', type=int, help='Channel to access/control (starts at 1)', default=1)
@@ -1621,8 +1645,8 @@ if __name__ == '__main__':
         instr.reset()               
 
         # load data as user arb wav enamed "my_stair"
-        data = [0, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7fff]
-        instr.setArbWaveData("my_stair", 1e6, 2, 1.0, data)
+        data = [0x8000, 0xA000, 0xC000, 0xE000, 0x0000, 0x2000, 0x4000, 0x6000, 0x7fff]
+        instr.setArbWaveData(data, "my_stair", 1e6, 2, 1.0)
         # select this new user waveform
         instr.setArbWaveByName("my_stair")
         # Set Mode to zero-order hold and 1MSa/s so each sample last 1 us
@@ -1678,11 +1702,11 @@ if __name__ == '__main__':
 
         sleep(5)
         
-        # turn off the channel
+        # turn off the chnnel
         instr.outputOff()
         
 
-    if (True):
+    if (False):
         # return to default parameters
         instr.reset()               
 
@@ -1700,6 +1724,104 @@ if __name__ == '__main__':
         fn = "my_stair.bin"
         readLen = instr.setArbWaveDataFromFile(fn,name,1e6,2.0,1.0)
         print("Read {} bytes of wave data from '{}' and sent as wave name '{}'".format(readLen,fn,name))
+        
+    if (False):
+        # return to default parameters
+        instr.reset()               
+
+        print(instr.queryArbWaveNamesUser())
+        
+        #@@@#waveData = instr.queryArbWaveData("my_stair")
+        #@@@#print([hex(x) for x in waveData])
+
+        name = "long_ramp"
+        fn = "long_ramp.bin"
+        writeLen = instr.queryArbWaveDataToFile(fn,name)
+        print("Wrote {} bytes of wave data by the name '{}' to '{}'".format(writeLen,name,fn))
+
+        #@@@#name = "my_stair2"
+        #@@@#fn = "my_stair.bin"
+        #@@@#readLen = instr.setArbWaveDataFromFile(fn,name,1e6,2.0,1.0)
+        #@@@#print("Read {} bytes of wave data from '{}' and sent as wave name '{}'".format(readLen,fn,name))
+        
+    if (False):
+        # return to default parameters
+        instr.reset()               
+
+        # load data as user arb wave named "my_stair"
+        #@@@#data = list(range(0,32768,int(32767/489)))
+        #@@@#data = list(range(0,32768,int(32767/900)))
+
+        ## Fails with I/O error - is 65MB of data which is > 40 MB the published limit.
+        ## Had to POWER CYCLE device to be able to use it again
+        #@@@#data = list(range(0,65536))*16*8*4
+        
+        #@@@#data = (list(range(0,65536))*319)+list(range(0,32768))
+        data = (list(range(0,65536))*320)
+
+        print("Length of data: {}".format(len(data)))
+        instr.setArbWaveData(data, "long_ramp", 1e6, 2, 1.0)
+
+        # select this new user waveform
+        instr.setArbWaveByName("long_ramp")
+        # Set Mode to zero-order hold and 1MSa/s so each sample last 1 us
+        instr.setArbModeHold(1e6)
+        
+        # turn on the channel
+        instr.outputOn()
+        
+    if (True):
+        # return to default parameters
+        instr.reset()               
+
+        name = "long_ramp"            
+        fn1 = "wave_write.bin"
+        fn2 = "wave_read.bin"
+
+        if (True):
+            # Create a binary file with wave data
+            # Send the wave data to the AWG
+            # Read it back into another file
+            # User can manually compare them
+            #@@@#data = list(range(0,32768,int(32767/489)))
+            #@@@#data = list(range(0,32768,int(32767/900)))
+            #@@@#data = list(range(0,65536))*16
+
+            ## NOTE: Will read 0 bytes if try to read a wave file this
+            ## large. It appears to write because the signals visualy
+            ## on an oscilloscope looks correct but cannot read data
+            ## back to compare. This is the full 40 MB size            
+            #@@@#data = (list(range(0,65536))*320)
+
+            ## NOTE: Also fails when try to read back wave data
+            #@@@#data = (list(range(0,65536))*260)
+
+            ## NOTE: Passes writing and then read backk and compare!
+            ## 32768000 bytes of data!
+            data = (list(range(0,65536))*250)
+
+            print("Length of wave data: {}".format(len(data)))
+            bindata = b''.join([x.to_bytes(2,'little') for x in data])
+            with open("wave_write.bin", "wb") as binary_file:
+                binary_file.write(bindata)
+
+            instr.setArbWaveDataFromFile(fn1, name, 1e6, 2, 1.0)
+
+        # select this new user waveform
+        instr.setArbWaveByName(name)
+        # Set Mode to zero-order hold and 1MSa/s so each sample last 1 us
+        instr.setArbModeHold(1e6)
+        
+        # turn on the channel
+        instr.outputOn()
+
+        writeLen = instr.queryArbWaveDataToFile(fn2,name)
+        print("Wrote {} bytes of wave data by the name '{}' to '{}'".format(writeLen,name,fn2))
+
+        if filecmp.cmp(fn1, fn2, shallow=False):
+            print("Written wave data file ({}) matches read wave data file ({}).".format(fn1,fn2))
+        else:
+            print("ERROR! Mismatch between written wave data file ({}) and read wave data file ({}).".format(fn1,fn2))
         
         
     sleep(5)

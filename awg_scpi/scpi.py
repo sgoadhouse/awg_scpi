@@ -70,6 +70,7 @@ class SCPI(object):
                  read_termination = '',
                  write_termination = '\n',
                  timeout = 5000,
+                 chunk_size = 20480,
                  encoding = 'ascii'):
         """Init the class with the instruments resource string
 
@@ -93,6 +94,7 @@ class SCPI(object):
         self._read_termination = read_termination
         self._write_termination = write_termination
         self._timeout = timeout
+        self._chunk_size = chunk_size
         self._encoding = encoding
         self._IDNmanu = ''      # store manufacturer from IDN here
         self._IDNmodel = ''     # store instrument model number from IDN here
@@ -106,7 +108,28 @@ class SCPI(object):
         if cmds is not None:
             # update _SCPICmdTbl[] with commands from child
             SCPI._SCPICmdTbl.update(cmds)
-        
+
+    ## This is a dummy method and exist solely say that it can be
+    ## changed to point to the write_raw() method of the VISA
+    ## Instrument Object returned by open_resource(). If you see the
+    ## print message, then something went wrong with the assignments.
+    def _saved_visa_write_raw(self, message: bytes) -> int:
+        print("DUMMY / {}".format(self))
+        return 0
+
+    ## This method is set to replace the write_raw() method of the
+    ## VISA Instrument Object returned by open_resource(). This allows
+    ## the byte message to be examined or handled differently as
+    ## needed just before the write_raw() call. Child classes can
+    ## override this to add their own twists like outputing to the
+    ## console every message that gets written (like a VISA Instrument
+    ## write sniffer).
+    ##
+    ## NOTE: Be sure if this is overridden that the final line remains
+    ## the same so that the VISA Instrument write_raw() method can be
+    ## called.
+    def _visa_write_raw(self, message):
+        return self._saved_visa_write_raw(message)
 
     def open(self):
         """Open a connection to the VISA device with PYVISA-py python library"""
@@ -114,8 +137,13 @@ class SCPI(object):
         self._inst = self._rm.open_resource(self._resource,
                                             read_termination=self._read_termination,
                                             write_termination=self._write_termination,
-                                            encoding=self._encoding)
-        self._inst.timeout = self._timeout
+                                            encoding=self._encoding,
+                                            timeout=self._timeout,
+                                            chunk_size=self._chunk_size)
+
+        ## Insert our self._visa_write_raw()
+        self._saved_visa_write_raw = self._inst.write_raw
+        self._inst.write_raw = self._visa_write_raw
 
         # Keysight recommends using clear()
         #
@@ -288,10 +316,10 @@ class SCPI(object):
         else:
             return False
         
-    def _wait(self):
+    def _waitToComplete(self):
         """Wait until all preceeding commands complete"""
         #self._instWrite('*WAI')
-        self._instWrite('*OPC')
+        #self._instWrite('*OPC')
         wait = True
         while(wait):
             ret = self._instQuery('*OPC?')
@@ -448,6 +476,118 @@ class SCPI(object):
             self.checkInstErrors(writeStr)
         return result
 
+    ## Needed to handle the 
+#    def _write_binary_values(
+#        self,
+#        message: str,
+#        values: Sequence[Any],
+#        datatype: util.BINARY_DATATYPES = "f",
+#        is_big_endian: bool = False,
+#        termination: Optional[str] = None,
+#        encoding: Optional[str] = None,
+#        header_fmt: util.BINARY_HEADERS = "ieee",
+#    ):
+#        """Write a string message to the device followed by values in binary format.
+#
+#        The write_termination is always appended to it.
+#
+#        Parameters
+#        ----------
+#        message : str
+#            The header of the message to be sent.
+#        values : Sequence[Any]
+#            Data to be written to the device.
+#        datatype : util.BINARY_DATATYPES, optional
+#            The format string for a single element. See struct module.
+#        is_big_endian : bool, optional
+#            Are the data in big or little endian order.
+#        termination : Optional[str], optional
+#            Alternative character termination to use. If None, the value of
+#            write_termination is used. Defaults to None.
+#        encoding : Optional[str], optional
+#            Alternative encoding to use to turn str into bytes. If None, the
+#            value of encoding is used. Defaults to None.
+#        header_fmt : util.BINARY_HEADERS
+#            Format of the header prefixing the data.
+#
+#        Returns
+#        -------
+#        int
+#            Number of bytes written.
+#
+#        """
+#        term = self._write_termination if termination is None else termination
+#        enco = self._encoding if encoding is None else encoding
+#
+#        if term and message.endswith(term):
+#            warnings.warn(
+#                "write message already ends with " "termination characters",
+#                stacklevel=2,
+#            )
+#
+#        if header_fmt == "ieee":
+#            block = util.to_ieee_block(values, datatype, is_big_endian)
+#        elif header_fmt == "hp":
+#            block = util.to_hp_block(values, datatype, is_big_endian)
+#        elif header_fmt == "empty":
+#            block = util.to_binary_block(values, b"", datatype, is_big_endian)
+#        else:
+#            raise ValueError("Unsupported header_fmt: %s" % header_fmt)
+#
+#        msg = message.encode(enco) + block
+#
+#        if term:
+#            msg += term.encode(enco)
+#
+#        count = self.write_raw(msg)
+#
+#        return count
+    
+    def _instWriteBinBlock(self, writeStr, values, datatype='H', is_big_endian=False, encoding=None, wait=None, checkErrors=None):
+        """
+        Write binary data in the list, values, with preceding command/parameter string, writeStr.
+
+        See https://pyvisa.readthedocs.io/en/latest/api/resources.html?highlight=binary_values#pyvisa.resources.MessageBasedResource.write_binary_values
+        for details on specific parameters.
+
+        datatype comes from Python struct format characters: https://docs.python.org/2/library/struct.html#format-characters
+        """
+
+        # If a wait time is NOT passed in, set wait to the
+        # default time
+        if wait is None:
+            wait = self._wait
+
+        if encoding is None:
+            encoding = self._encoding
+            
+        if (checkErrors is None):
+            # Default for checkErrors is pulled from self._defaultCheckErrors
+            checkErrors = self._defaultCheckErrors
+
+        if (writeStr is None):
+            writeStr = ''
+        elif (writeStr[0] != '*'):
+            writeStr = self._prefix + writeStr
+        #print("WRITE:",writeStr)
+            
+        try:
+            result = self._inst.write_binary_values(writeStr, values, datatype=datatype, is_big_endian=is_big_endian, encoding=encoding, header_fmt='empty')
+            #@@@#print("Wrote {} binary bytes".format(result)) 
+        except visa.VisaIOError as err:
+            # Got VISA exception so read and report any errors
+            print("Exited because of VISA IO Error: {}".format(err))
+            if checkErrors:
+                self.checkInstErrors(writeStr)
+            exit(1)
+
+        sleep(wait)             # give some time for PS to respond
+
+        if checkErrors:
+            self.checkInstErrors(writeStr)
+            
+        return result
+    
     def _versionUpdated(self):
         """Overload this function in child classes so can update parameters once the version number is known."""
         pass

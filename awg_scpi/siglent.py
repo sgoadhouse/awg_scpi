@@ -44,7 +44,6 @@ from time import sleep
 from datetime import datetime
 from sys import version_info
 import numpy as np
-import struct
 import pyvisa as visa
 
 class Siglent(AWG):
@@ -105,13 +104,16 @@ class Siglent(AWG):
         }
 
         # NOTE: maxChannel is accessible in this package via parent as: self._max_chan
+        # NOTE: timeout can be the default if not writing more than about 30 MB wave data files.
         super(Siglent, self).__init__(resource, maxChannel, wait,
                                       cmds=_SiglentCmdTbl,
                                       cmd_prefix='',
                                       read_strip='\n',
                                       read_termination='',
                                       write_termination='\n',
-                                      encoding='ISO-8859-1' # allow 0xff to be sent in arbitrary waveform data
+                                      encoding='ISO-8859-1', # allow 0xff to be sent in arbitrary waveform data
+                                      chunk_size = 40*1024,   # from Siglent manual
+                                      timeout = 10000         # in case writing the largest possible wave data
         )
 
         # Return list of valid analog channel strings. These are numbers.
@@ -145,6 +147,16 @@ class Siglent(AWG):
         self._annotationText = ''
         self._annotationColor = 'ch1' # default to Channel 1 color
 
+        # BUG work around for Siglent SDG6022X and probably other SDG
+        # series AWGs. Defining here in case a child class is created
+        # for a different member of the series but it requires a
+        # different chunk value to work. I discovered the magic values
+        # by experimentation. It is not documented that I could find.
+        #
+        # If it is discovered that this bug is fixed, set to None        
+        self._write_chunk_size = 1024
+        #@@@#self._write_chunk_size = None
+
     def _versionUpdated(self):
         """Overload this function in child classes so can update parameters once the version number is known."""
 
@@ -157,6 +169,79 @@ class Siglent(AWG):
         # Now that the _errorCmd has been set, can check for errors
         self._defaultCheckErrors = True
                     
+    ## Overloading this method so can handle an apparent bug in the
+    ## Siglent SDG series (at least the 6022X). If a write message is
+    ## longer than 1024 bytes, the AWG accepts the following bytes in
+    ## the message but treats subsequent write operations as
+    ## additional data to go along with the first write. So if the
+    ## message is > 1024, break up the writes into chunks. The chunks
+    ## must be 1025 bytes long. If only 1024 bytes are written, then
+    ## the subsequent write is considered a new command.
+    def _visa_write_raw(self, message):
+        # remaining bytes to write - starts as full message
+        remLen = len(message)
+
+        #@@@#print('VISA Write of {} bytes: {}'.format(remLen,message))
+        
+        if (self._write_chunk_size is None):
+            # send full message in a single write and jump over all of
+            # the computational code to be a little faster
+            indexes = [(0,remLen)]
+        else:
+            # Determine the indexes needed to write in chunks of size self._write_chunk_size+1
+            start = 0
+            end = 0
+            indexes = []
+            while(True):
+                start = end                
+                if (self._write_chunk_size >= remLen):
+                    # Can complete the write so break out of loop - this is the last loop
+                    end += remLen
+                    remLen = 0
+                    indexes.append((start,end))
+                    break
+                else:
+                    ## Add 1 to self._write_chunk_size because to make
+                    ## the SDG think each write_raw() operation is
+                    ## part of the same command, must go beyond the
+                    ## chunk_size
+                    end += self._write_chunk_size + 1
+                    remLen -= self._write_chunk_size + 1
+                    indexes.append((start,end)) 
+
+        count = 0
+        for idx in indexes:
+            #@@@#print("Sending message[{}:{}]".format(*idx))
+            count += self._saved_visa_write_raw(message[idx[0]:idx[1]])
+
+        return count
+
+    ## Overloading this method so can handle an apparent bug in the
+    ## Siglent SDG series (at least the 6022X). If a write message is
+    ## longer than 1024 bytes, the AWG accepts the following bytes in
+    ## the message but treats subsequent writes as additional data to
+    ## go along with the first write. So if > 1024, send all but the
+    ## last byte and then send the last byte in a subsequent write
+    ## message.
+    ##
+    ## WARNING: This DOES work with a 1906 bytes message, but do not
+    ## know if there is some larger internal size limit where this no
+    ## longer works so using the above version that breaks up the
+    ## message in self._write_chunk_size+1 chunks.
+    def _visa_write_raw_OLD(self, message):
+        # remaining bytes to write - starts as full message
+        remLen = len(message)
+
+        #@@@#print('VISA Write of {} bytes: {}'.format(remLen,message))
+
+        if (len(message) > self._write_chunk_size):
+            count = self._saved_visa_write_raw(message[:-1])
+            count += self._saved_visa_write_raw(message[-1:])
+        else:
+            count = self._saved_visa_write_raw(message)
+            
+        return count
+        
 
     def channelStr(self, channel):
         """return the channel string given the channel number. If pass in None, return None."""
@@ -201,11 +286,23 @@ class Siglent(AWG):
         if(len(words) != 2 or words[0].strip() != str):
             raise RuntimeError('Unexpected return string for OUTP? command: "' + ret + '"')
 
+        ## OUTP? unlike other commands return OFF/ON first and then a
+        ## string of Parameter,Values. So remove the first param so
+        ## can turn the remaning into a dictionary of Parameter/Values
+        param = words[1].strip().split(',')
+        isOn = (param[0].upper() == 'ON')
+        param.pop(0)
+        if(len(param)%2 != 0):
+            raise RuntimeError('Expected an even number of returned comma seperated words from {}? command:\n   "' + ret + '"'.format(cmd))
+
+        it = iter(param)
+        ret_dict = dict(zip(it, it))
+
         #@@@#print('ret: "' + ret + '" words: ', words, " param: ", param)
 
         # return the comma seperate list of parameters as a Python list
         # ORDER: ON|OFF,LOAD,50|HZ,PLRT,NOR|INVT
-        return words[1].strip().split(',')
+        return (isOn, ret_dict)
 
     def isOutputHiZ(self, channel=None):
         """Return true if the output of channel is set for high impedance, else false
@@ -213,13 +310,9 @@ class Siglent(AWG):
            channel - number of the channel starting at 1
         """
 
-        outp = self._queryOutput(channel)
+        (isOn,outParam) = self._queryOutput(channel)
         
-        if(len(outp) != 5 or outp[1].lower() != "load"):
-            raise RuntimeError('Unexpected return parameters for OUTP? command: {}'.format(outp))
-            
-        # The third parameter is 50 for 50 ohm load and HZ for high impedance
-        return (outp[2].lower() == "hz")
+        return (outParam['LOAD'].upper() == "HZ")
 
     def isOutput50(self, channel=None):
         """Return true if the output of channel is set for 50 ohm load, else false
@@ -227,13 +320,9 @@ class Siglent(AWG):
            channel - number of the channel starting at 1
         """
 
-        outp = self._queryOutput(channel)
+        (isOn,outParam) = self._queryOutput(channel)
         
-        if(len(outp) != 5 or outp[1].lower() != "load"):
-            raise RuntimeError('Unexpected return parameters for OUTP? command: {}'.format(outp))
-            
-        # The third parameter is 50 for 50 ohm load and HZ for high impedance
-        return (outp[2] == "50")
+        return (outParam['LOAD'] == "50")
 
     def isOutputInverted(self, channel=None):
         """Return true if the output of channel is inverted, else false
@@ -241,13 +330,9 @@ class Siglent(AWG):
            channel - number of the channel starting at 1
         """
 
-        outp = self._queryOutput(channel)
+        (isOn,outParam) = self._queryOutput(channel)
         
-        if(len(outp) != 5 or outp[3].lower() != "plrt"):
-            raise RuntimeError('Unexpected return parameters for OUTP? command: {}'.format(outp))
-            
-        # The fifth parameter is NOR for normal and INVT for inverted
-        return (outp[4].lower() == "invt")
+        return (outParam['PLRT'].upper() == "INVT")
 
     def isOutputOn(self, channel=None):
         """Return true if the output of channel is ON, else false
@@ -256,7 +341,7 @@ class Siglent(AWG):
         """
 
         # The first parameter is ON for output on and OFF for output off
-        return self._onORoff(self._queryOutput(channel)[0])
+        return self._queryOutput(channel)[0]
 
     def outputOn(self, channel=None, wait=None):
         """Turn on the output for channel
